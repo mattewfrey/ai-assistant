@@ -1,0 +1,29 @@
+[project]
+name = "assistant-gateway"
+version = "0.1.0"
+description = "Backend UI / Assistant Gateway for e-commerce pharmacy"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.23.0",
+    "pydantic>=2.6.0",
+    "httpx>=0.25.0",
+    "openai>=1.3.0",
+    "langchain-core>=0.3.0",
+    "langchain-openai>=0.2.0",
+    "langchain-community>=0.2.0",
+    "pyyaml>=6.0.0",
+    "pytest>=7.4.0",
+    "anyio>=4.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest-asyncio>=0.21.0",
+    "ruff>=0.1.0",
+]
+
+[build-system]
+requires = ["setuptools>=68.0.0"]
+build-backend = "setuptools.build_meta"
+

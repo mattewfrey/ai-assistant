@@ -1,0 +1,25 @@
+[
+  {
+    "id": "user_1",
+    "name": "Ольга",
+    "phone": "+7 900 000-00-00",
+    "email": "olga@example.com",
+    "loyalty_status": "gold",
+    "bonus_points": 1250,
+    "default_delivery_type": "pickup",
+    "default_region_id": "MOW",
+    "default_pharmacy_id": "ph1"
+  },
+  {
+    "id": "user_2",
+    "name": "Иван",
+    "phone": "+7 901 100-22-33",
+    "email": "ivan@example.com",
+    "loyalty_status": "silver",
+    "bonus_points": 320,
+    "default_delivery_type": "courier",
+    "default_region_id": "SPB",
+    "default_pharmacy_id": "ph2"
+  }
+]
+

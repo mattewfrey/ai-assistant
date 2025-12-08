@@ -1,0 +1,120 @@
+[
+  {
+    "order_id": "order_active_1",
+    "user_id": "user_1",
+    "status": "IN_PROGRESS",
+    "status_label": "Собираем заказ",
+    "delivery_type": "pickup",
+    "pharmacy_id": "ph1",
+    "created_at": "2025-11-30T10:15:00+03:00",
+    "eta_minutes": 25,
+    "items_ready": false,
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "title": "ТераФлю порошок 10 пак.",
+        "qty": 1,
+        "price": 549.0
+      },
+      {
+        "product_id": "prod-baby-cough",
+        "title": "Детский сироп от кашля 100 мл",
+        "qty": 2,
+        "price": 420.0
+      }
+    ],
+    "total": 1389.0,
+    "currency": "RUB"
+  },
+  {
+    "order_id": "order_ready_1",
+    "user_id": "user_1",
+    "status": "READY_FOR_PICKUP",
+    "status_label": "Готов к выдаче",
+    "delivery_type": "pickup",
+    "pharmacy_id": "ph1",
+    "created_at": "2025-11-28T14:45:00+03:00",
+    "eta_minutes": 5,
+    "items_ready": true,
+    "items": [
+      {
+        "product_id": "prod_001",
+        "title": "Витамин C 500 мг №30",
+        "qty": 1,
+        "price": 350.0
+      }
+    ],
+    "total": 350.0,
+    "currency": "RUB"
+  },
+  {
+    "order_id": "order_completed_1",
+    "user_id": "user_1",
+    "status": "DELIVERED",
+    "status_label": "Заказ выдан",
+    "delivery_type": "pickup",
+    "pharmacy_id": "ph1",
+    "created_at": "2025-11-15T16:20:00+03:00",
+    "completed_at": "2025-11-16T09:30:00+03:00",
+    "items_ready": true,
+    "items": [
+      {
+        "product_id": "prod-baby-cough",
+        "title": "Детский сироп от кашля 100 мл",
+        "qty": 1,
+        "price": 420.0
+      },
+      {
+        "product_id": "prod_005",
+        "title": "Увлажняющий крем для рук",
+        "qty": 1,
+        "price": 260.0
+      }
+    ],
+    "total": 680.0,
+    "currency": "RUB"
+  },
+  {
+    "order_id": "order_cancelled_1",
+    "user_id": "user_1",
+    "status": "CANCELLED",
+    "status_label": "Отменён пользователем",
+    "delivery_type": "courier",
+    "pharmacy_id": "ph3",
+    "created_at": "2025-11-10T09:10:00+03:00",
+    "cancelled_at": "2025-11-10T10:05:00+03:00",
+    "items_ready": false,
+    "items": [
+      {
+        "product_id": "prod_002",
+        "title": "Омега-3 капсулы №60",
+        "qty": 1,
+        "price": 890.0
+      }
+    ],
+    "total": 890.0,
+    "currency": "RUB"
+  },
+  {
+    "order_id": "order_completed_2",
+    "user_id": "user_2",
+    "status": "PICKED_UP",
+    "status_label": "Получен",
+    "delivery_type": "pickup",
+    "pharmacy_id": "ph2",
+    "created_at": "2025-11-12T18:00:00+03:00",
+    "completed_at": "2025-11-12T19:05:00+03:00",
+    "items_ready": true,
+    "items": [
+      {
+        "product_id": "prod-cold-tabs",
+        "title": "Таблетки от боли в горле",
+        "qty": 1,
+        "price": 310.0
+      }
+    ],
+    "total": 310.0,
+    "currency": "RUB"
+  }
+]
+

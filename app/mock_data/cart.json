@@ -1,0 +1,41 @@
+{
+  "default": {
+    "cart_id": "cart-demo",
+    "currency": "RUB",
+    "items": [
+      {
+        "product_id": "prod-baby-cough",
+        "qty": 1,
+        "price": 420.0
+      }
+    ]
+  },
+  "user_1": {
+    "cart_id": "cart-user_1",
+    "currency": "RUB",
+    "items": [
+      {
+        "product_id": "prod-baby-cough",
+        "qty": 1,
+        "price": 420.0
+      },
+      {
+        "product_id": "prod_001",
+        "qty": 2,
+        "price": 350.0
+      }
+    ]
+  },
+  "user_2": {
+    "cart_id": "cart-user_2",
+    "currency": "RUB",
+    "items": [
+      {
+        "product_id": "prod_002",
+        "qty": 1,
+        "price": 890.0
+      }
+    ]
+  }
+}
+

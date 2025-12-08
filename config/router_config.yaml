@@ -1,0 +1,469 @@
+defaults:
+  slot_questions:
+    symptom: "Какой именно симптом беспокоит?"
+    age: "Сколько лет человеку, для которого подбираем препараты?"
+    price_max: "До какой суммы смотреть варианты?"
+    dosage_form: "В какой форме выпуск предпочитаете (таблетки, сироп, спрей)?"
+    product_id: "Какой именно товар имеете в виду?"
+    order_id: "Укажите номер заказа, пожалуйста."
+    promo_code: "Введите промокод."
+    pharmacy_id: "Какую аптеку выбираете?"
+    metro: "Возле какой станции метро ищем?"
+
+intents:
+  # ==================== Корзина ====================
+  SHOW_CART:
+    channel: navigation
+    triggers:
+      - "корзин"
+      - "что в корзине"
+      - "cart"
+      - "показать корзину"
+
+  ADD_TO_CART:
+    channel: data
+    triggers:
+      - "добавь в корзину"
+      - "положи в корзину"
+      - "добавить в корзину"
+      - "хочу купить"
+    slots_required:
+      - product_id
+
+  APPLY_PROMO_CODE:
+    channel: data
+    triggers:
+      - "промокод"
+      - "применить код"
+      - "скидка по коду"
+      - "ввести промокод"
+    slots_required:
+      - promo_code
+
+  SELECT_DELIVERY_TYPE:
+    channel: data
+    triggers:
+      - "доставк"
+      - "самовывоз"
+      - "курьер"
+      - "способ получения"
+
+  # ==================== Заказы ====================
+  SHOW_ORDER_STATUS:
+    channel: order
+    triggers:
+      - "статус заказа"
+      - "где мой заказ"
+      - "когда готов"
+      - "order status"
+
+  SHOW_ACTIVE_ORDERS:
+    channel: order
+    triggers:
+      - "мои заказ"
+      - "активные заказы"
+      - "текущие заказы"
+
+  SHOW_COMPLETED_ORDERS:
+    channel: order
+    triggers:
+      - "история заказов"
+      - "прошлые заказы"
+      - "выполненные заказы"
+
+  PLACE_ORDER:
+    channel: order
+    triggers:
+      - "оформить заказ"
+      - "оформить покупку"
+      - "checkout"
+      - "заказать"
+
+  CANCEL_ORDER:
+    channel: order
+    triggers:
+      - "отменить заказ"
+      - "отмена заказа"
+      - "cancel order"
+    slots_required:
+      - order_id
+
+  EXTEND_ORDER:
+    channel: order
+    triggers:
+      - "продлить заказ"
+      - "продлить хранение"
+      - "увеличить время"
+
+  REORDER_PREVIOUS:
+    channel: order
+    triggers:
+      - "повторить заказ"
+      - "заказать снова"
+      - "такой же заказ"
+
+  SHOW_ORDER_DELIVERY_TIME:
+    channel: order
+    triggers:
+      - "когда доставят"
+      - "время доставки"
+      - "сколько ждать"
+
+  # ==================== Избранное / Профиль ====================
+  SHOW_FAVORITES:
+    channel: navigation
+    triggers:
+      - "избран"
+      - "любим"
+      - "favorite"
+      - "сохранённое"
+
+  SHOW_PROFILE:
+    channel: navigation
+    triggers:
+      - "профил"
+      - "аккаунт"
+      - "profile"
+      - "мой профиль"
+
+  UPDATE_PROFILE:
+    channel: data
+    triggers:
+      - "обновить профиль"
+      - "изменить данные"
+      - "настройки профиля"
+
+  SHOW_ACTIVE_COUPONS:
+    channel: navigation
+    triggers:
+      - "купон"
+      - "мои скидки"
+      - "промоакции"
+      - "доступные скидки"
+
+  SHOW_BONUS_BALANCE:
+    channel: navigation
+    triggers:
+      - "бонус"
+      - "баланс бонусов"
+      - "сколько бонусов"
+
+  # ==================== Аптеки ====================
+  SHOW_NEARBY_PHARMACIES:
+    channel: navigation
+    triggers:
+      - "аптек"
+      - "рядом"
+      - "ближайш"
+      - "pharmacy"
+
+  SHOW_PHARMACIES_BY_METRO:
+    channel: navigation
+    triggers:
+      - "аптеки у метро"
+      - "аптека рядом с"
+      - "возле станции"
+    slots_required:
+      - metro
+
+  SHOW_PHARMACY_INFO:
+    channel: navigation
+    triggers:
+      - "информация об аптеке"
+      - "об аптеке"
+      - "данные аптеки"
+    slots_required:
+      - pharmacy_id
+
+  SHOW_PHARMACY_HOURS:
+    channel: navigation
+    triggers:
+      - "часы работы"
+      - "режим работы"
+      - "когда открыта"
+      - "время работы аптеки"
+
+  # ==================== Товары - поиск ====================
+  FIND_PRODUCT_BY_NAME:
+    channel: data
+    triggers: []
+
+  FIND_BY_SYMPTOM:
+    channel: data
+    triggers:
+      - "болит"
+      - "кашель"
+      - "насморк"
+      - "простуд"
+      - "температур"
+      - "жар"
+      - "от головы"
+      - "от горла"
+    slots_required:
+      - symptom
+      - age
+    slot_questions:
+      symptom: "Какой именно симптом беспокоит?"
+      age: "Уточните возраст, пожалуйста."
+
+  FIND_BY_DISEASE:
+    channel: data
+    triggers:
+      - "при диагнозе"
+      - "при болезни"
+      - "лечение"
+      - "орви"
+      - "грипп"
+      - "гастрит"
+
+  FIND_BY_CATEGORY:
+    channel: data
+    triggers:
+      - "категор"
+      - "витамины"
+      - "косметика"
+      - "для детей"
+      - "от простуды"
+
+  FIND_PRODUCT_BY_INN:
+    channel: data
+    triggers:
+      - "по МНН"
+      - "действующее вещество"
+      - "по составу"
+      - "ибупрофен"
+      - "парацетамол"
+
+  FIND_ANALOGS:
+    channel: data
+    triggers:
+      - "аналог"
+      - "замена"
+      - "похожий препарат"
+      - "чем заменить"
+    slots_required:
+      - product_id
+
+  FIND_PROMO:
+    channel: data
+    triggers:
+      - "скидки"
+      - "акции"
+      - "распродажа"
+      - "выгодные предложения"
+      - "по акции"
+
+  # ==================== Товары - информация ====================
+  SHOW_PRODUCT_INFO:
+    channel: data
+    triggers:
+      - "подробнее о"
+      - "информация о товаре"
+      - "расскажи про"
+      - "что за препарат"
+    slots_required:
+      - product_id
+
+  SHOW_PRODUCT_INSTRUCTIONS:
+    channel: data
+    triggers:
+      - "инструкция"
+      - "как принимать"
+      - "способ применения"
+      - "дозировка"
+    slots_required:
+      - product_id
+
+  SHOW_PRODUCT_CONTRAINDICATIONS:
+    channel: data
+    triggers:
+      - "противопоказания"
+      - "побочные эффекты"
+      - "когда нельзя"
+      - "ограничения"
+    slots_required:
+      - product_id
+
+  SHOW_DETAILED_PRODUCT_SPECIFICATIONS:
+    channel: data
+    triggers:
+      - "характеристики"
+      - "состав препарата"
+      - "спецификация"
+      - "подробный состав"
+    slots_required:
+      - product_id
+
+  SHOW_PRODUCT_AVAILABILITY:
+    channel: data
+    triggers:
+      - "наличие"
+      - "есть в аптеке"
+      - "где купить"
+      - "в каких аптеках"
+    slots_required:
+      - product_id
+
+  SHOW_NEAREST_PHARMACY_WITH_PRODUCT:
+    channel: data
+    triggers:
+      - "где ближе всего"
+      - "ближайшая аптека с"
+      - "где забрать"
+    slots_required:
+      - product_id
+
+  BOOK_PRODUCT_PICKUP:
+    channel: data
+    triggers:
+      - "забронировать"
+      - "зарезервировать"
+      - "бронь"
+      - "отложить товар"
+    slots_required:
+      - product_id
+
+  # ==================== Правовая информация ====================
+  RETURN_POLICY:
+    channel: knowledge
+    triggers:
+      - "возврат"
+      - "вернуть товар"
+      - "обмен"
+      - "политика возврата"
+
+  STORAGE_RULES:
+    channel: knowledge
+    triggers:
+      - "как хранить"
+      - "условия хранения"
+      - "правила хранения"
+      - "где хранить"
+
+  EXPIRATION_INFO:
+    channel: knowledge
+    triggers:
+      - "срок годности"
+      - "срок хранения"
+      - "когда истекает"
+      - "expiration"
+
+  PRESCRIPTION_POLICY:
+    channel: knowledge
+    triggers:
+      - "рецепт"
+      - "рецептурный"
+      - "нужен рецепт"
+      - "по рецепту"
+
+  DELIVERY_RULES:
+    channel: knowledge
+    triggers:
+      - "правила доставки"
+      - "условия доставки"
+      - "как доставляете"
+      - "доставка лекарств"
+
+  PHARMACY_LEGAL_INFO:
+    channel: knowledge
+    triggers:
+      - "лицензия"
+      - "юридическая информация"
+      - "правовая информация"
+      - "сертификат"
+
+  SAFETY_WARNINGS:
+    channel: knowledge
+    triggers:
+      - "безопасность"
+      - "предупреждения"
+      - "осторожно"
+      - "опасно"
+
+  SYMPTOM_SELFCARE_ADVICE:
+    channel: knowledge
+    triggers:
+      - "что делать при"
+      - "самопомощь"
+      - "первая помощь"
+      - "домашнее лечение"
+
+  PREVENTION_ADVICE:
+    channel: knowledge
+    triggers:
+      - "профилактика"
+      - "как не заболеть"
+      - "укрепить иммунитет"
+      - "предотвратить"
+
+  ASK_PHARMACIST:
+    channel: knowledge
+    triggers:
+      - "спросить фармацевта"
+      - "консультация"
+      - "посоветуйте"
+      - "помогите выбрать"
+
+  CONTACT_SUPPORT:
+    channel: support
+    triggers:
+      - "поддержка"
+      - "помощь"
+      - "оператор"
+      - "жалоба"
+      - "претензия"
+
+# ==================== Сущности ====================
+entities:
+  product_brands:
+    - "нурофен"
+    - "анви"
+    - "колдрекс"
+    - "терафлю"
+    - "ингавирин"
+    - "ферринг"
+    - "эссенциале"
+    - "омепразол"
+    - "но-шпа"
+    - "аспирин"
+
+  symptom_keywords:
+    - "голов"
+    - "горл"
+    - "кашель"
+    - "насморк"
+    - "жар"
+    - "температур"
+    - "простуд"
+    - "тошнот"
+    - "боль"
+    - "слабость"
+
+  dosage_forms:
+    tablets:
+      - "таблет"
+      - "табл."
+    syrup:
+      - "сироп"
+    spray:
+      - "спрей"
+    capsules:
+      - "капсул"
+    drops:
+      - "капли"
+    powder:
+      - "порошок"
+    cream:
+      - "крем"
+      - "мазь"
+
+  age_groups:
+    children:
+      - "ребён"
+      - "дет"
+      - "малыш"
+    adults:
+      - "взросл"
+    elderly:
+      - "пожил"
+      - "стар"

@@ -1,0 +1,39 @@
+[
+  {
+    "id": "addr_001",
+    "user_id": "user_1",
+    "label": "Дом",
+    "city": "Москва",
+    "street": "1-й Красногвардейский проспект",
+    "house": "14с3",
+    "region_id": "MOW",
+    "lat": 55.7495,
+    "lon": 37.5375,
+    "is_default": true
+  },
+  {
+    "id": "addr_002",
+    "user_id": "user_1",
+    "label": "Работа",
+    "city": "Москва",
+    "street": "Пресненская наб.",
+    "house": "10",
+    "region_id": "MOW",
+    "lat": 55.7499,
+    "lon": 37.539,
+    "is_default": false
+  },
+  {
+    "id": "addr_003",
+    "user_id": "user_2",
+    "label": "Дом",
+    "city": "Санкт-Петербург",
+    "street": "Невский проспект",
+    "house": "15",
+    "region_id": "SPB",
+    "lat": 59.9347,
+    "lon": 30.3357,
+    "is_default": true
+  }
+]
+
