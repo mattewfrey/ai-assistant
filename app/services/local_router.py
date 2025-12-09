@@ -24,14 +24,71 @@ _FAVORITES_PATTERNS = (r"избранн", r"избранные товары")
 _PROFILE_PATTERNS = (r"мой профиль", r"\bпрофиль\b")
 _NAVIGATION_GUARDS = ("корзин", "заказ", "избран", "профил")
 
+# Фразы, которые НЕ являются запросами товаров (приветствия, благодарности и т.д.)
+_SMALL_TALK_PATTERNS = (
+    r"^\s*привет\s*$",
+    r"^\s*здравствуй",
+    r"^\s*добр(ый|ое|ого)\s+(день|утр|вечер)",
+    r"^\s*хай\s*$",
+    r"^\s*hi\s*$",
+    r"^\s*hello\s*$",
+    r"^\s*спасибо\s*$",
+    r"^\s*благодар",
+    r"^\s*пока\s*$",
+    r"^\s*до\s+свидания",
+    r"^\s*давай\s*$",
+    r"^\s*ок(ей)?\s*$",
+    r"^\s*хорошо\s*$",
+    r"^\s*понятно\s*$",
+    r"^\s*ясно\s*$",
+    r"^\s*да\s*$",
+    r"^\s*нет\s*$",
+    r"^\s*ага\s*$",
+    r"^\s*угу\s*$",
+    r"^\s*ладно\s*$",
+    r"^\s*что\??\s*$",
+    r"^\s*как дела",
+    r"^\s*что нового",
+    r"^\s*что умеешь",
+    r"^\s*помо(щь|ги|жешь)",
+)
+
 
 def _contains_any(text: str, patterns: Iterable[str]) -> bool:
     return any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns)
 
 
+def _is_small_talk(text: str) -> bool:
+    """Check if text is a greeting, thank you, or other non-product phrase."""
+    return any(re.search(pattern, text, re.IGNORECASE) for pattern in _SMALL_TALK_PATTERNS)
+
+
+def _looks_like_product_name(text: str) -> bool:
+    """Check if text looks like a product name (has uppercase, digits, or brand-like patterns)."""
+    # Содержит цифры (дозировка: "500мг", "100мл")
+    if re.search(r"\d", text):
+        return True
+    # Начинается с заглавной буквы (название бренда)
+    if text[0].isupper():
+        return True
+    # Содержит латиницу (международное название)
+    if re.search(r"[a-zA-Z]", text):
+        return True
+    return False
+
+
 def _is_short_product_query(text: str) -> bool:
+    """Check if text is a short query that looks like a product search."""
     tokens = [token for token in re.split(r"\s+", text.strip()) if token]
-    return 1 <= len(tokens) <= 3
+    if not (1 <= len(tokens) <= 3):
+        return False
+    
+    # Отклоняем short talk фразы
+    if _is_small_talk(text):
+        return False
+    
+    # Требуем признаки продукта: цифры, заглавные буквы или латиницу
+    return _looks_like_product_name(text)
 
 
 def route(request: ChatRequest) -> LocalRouterResult:

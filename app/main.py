@@ -38,8 +38,31 @@ def create_app() -> FastAPI:
     )
 
     @app.get("/health")
-    async def health() -> dict[str, str]:
-        return {"status": "ok"}
+    async def health() -> dict[str, any]:
+        """Health check endpoint with dependency status."""
+        checks = {
+            "config_loaded": True,
+            "router_config_loaded": False,
+            "llm_configured": bool(settings.openai_api_key),
+            "langsmith_enabled": bool(settings.langsmith_api_key and settings.langsmith_tracing_v2),
+        }
+        
+        # Check router config
+        try:
+            from .services.router import get_router_service
+            router = get_router_service()
+            checks["router_config_loaded"] = len(router._rules) > 0
+        except Exception:
+            checks["router_config_loaded"] = False
+        
+        all_ok = checks["config_loaded"] and checks["router_config_loaded"]
+        
+        return {
+            "status": "ok" if all_ok else "degraded",
+            "checks": checks,
+            "version": settings.assistant_system_prompt_version,
+            "environment": settings.env,
+        }
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(
