@@ -284,31 +284,32 @@ class LangchainLLMClient:
         self._beautify_prompt = build_beautify_prompt()
         
         # Structured output для intent classification
+        # Используем method="function_calling" т.к. OpenAI strict mode требует additionalProperties=false
         self._intent_llm = self._intent_llm_base.with_structured_output(
             LLMIntentResult,
             include_raw=True,
-            strict=True,
+            method="function_calling",
         )
         
         # Structured output для beautify
         self._beautify_llm = self._beautify_llm_base.with_structured_output(
             Reply,
             include_raw=True,
-            strict=True,
+            method="function_calling",
         )
         
         # Structured output для slot extraction
         self._slot_extraction_llm = self._intent_llm_base.with_structured_output(
             LLMSlotExtractionResult,
             include_raw=True,
-            strict=True,
+            method="function_calling",
         )
         
         # Structured output для disambiguation
         self._disambiguation_llm = self._intent_llm_base.with_structured_output(
             LLMDisambiguationResult,
             include_raw=True,
-            strict=True,
+            method="function_calling",
         )
         
         # Retry chains
@@ -529,7 +530,7 @@ class LangchainLLMClient:
         llm = self._intent_llm_base.with_structured_output(
             LLMDisambiguationResult,
             include_raw=True,
-            strict=True,
+            method="function_calling",
         )
         chain = RunnableRetry(
             prompt | llm,
@@ -595,7 +596,7 @@ class LangchainLLMClient:
         llm = self._intent_llm_base.with_structured_output(
             LLMSlotExtractionResult,
             include_raw=True,
-            strict=True,
+            method="function_calling",
         )
         chain = RunnableRetry(
             prompt | llm,
@@ -965,10 +966,11 @@ class LangchainLLMClient:
                 os.environ.setdefault("LANGCHAIN_ENDPOINT", settings.langsmith_endpoint)
             else:
                 os.environ.setdefault("LANGCHAIN_ENDPOINT", "https://api.smith.langchain.com")
+            # Project задаётся через env var LANGSMITH_PROJECT (выше)
+            # Новые версии LangSmith не принимают project в конструкторе
             return LangSmithClient(
                 api_key=settings.langsmith_api_key,
                 api_url=settings.langsmith_endpoint or None,
-                project=project,
             )
         except Exception as exc:  # pragma: no cover - tracing is best-effort
             logger.warning("LangSmith client disabled: %s", exc)

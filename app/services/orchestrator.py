@@ -590,9 +590,9 @@ class Orchestrator:
                         ],
                         "llm_backend": llm_backend,
                         "llm_used": llm_used,
+                        "trace_id": trace_id,  # Включаем trace_id в metadata
                     },
                     debug_builder=builder,
-                    trace_id=trace_id,
                 )
             except Exception as exc:  # pragma: no cover - safety net
                 logger.warning("Beautify reply failed, using original. error=%s", exc)

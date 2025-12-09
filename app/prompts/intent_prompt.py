@@ -375,6 +375,11 @@ FEW_SHOT_EXAMPLES = """
 # Основные функции построения промптов
 # =============================================================================
 
+def _escape_for_langchain(text: str) -> str:
+    """Экранирует фигурные скобки для LangChain templates."""
+    return text.replace("{", "{{").replace("}", "}}")
+
+
 def build_intent_prompt(schema_hint: str) -> ChatPromptTemplate:
     """
     Строит ChatPromptTemplate для классификации интентов.
@@ -385,8 +390,9 @@ def build_intent_prompt(schema_hint: str) -> ChatPromptTemplate:
     Returns:
         ChatPromptTemplate для LangChain
     """
-    # Экранируем фигурные скобки в схеме для LangChain template
-    escaped_schema = schema_hint.replace("{", "{{").replace("}", "}}")
+    # Экранируем фигурные скобки для LangChain template
+    escaped_schema = _escape_for_langchain(schema_hint)
+    escaped_few_shot = _escape_for_langchain(FEW_SHOT_EXAMPLES)
     
     system_message = f"""Ты — AI-ассистент аптечной сети, встроенный в чат e-commerce платформы.
 
@@ -411,7 +417,7 @@ def build_intent_prompt(schema_hint: str) -> ChatPromptTemplate:
 
 {SAFETY_RULES}
 
-{FEW_SHOT_EXAMPLES}
+{escaped_few_shot}
 
 ## JSON СХЕМА ОТВЕТА (LLMIntentResult)
 

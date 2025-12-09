@@ -463,8 +463,24 @@ class RouterService:
                     match_info.match_type = "symptom_keyword"
                     match_info.matched_patterns.append("symptom_stem")
                 elif self._symptom_regex.search(message):
-                    match_info.match_type = "symptom_regex"
-                    match_info.matched_patterns.append("symptom_pattern")
+                    # Дополнительная проверка: убедимся что найденный "симптом" 
+                    # действительно содержит медицинские термины
+                    regex_match = self._symptom_regex.search(message)
+                    if regex_match:
+                        candidate_symptom = regex_match.group("symptom").lower().strip()
+                        # Проверяем что кандидат содержит хотя бы один медицинский термин
+                        has_medical_term = any(
+                            stem in candidate_symptom 
+                            for stem in SYMPTOM_STEMS.keys()
+                        )
+                        if has_medical_term:
+                            match_info.match_type = "symptom_regex"
+                            match_info.matched_patterns.append("symptom_pattern")
+                        else:
+                            # Regex сработал, но это не медицинский симптом — пропускаем
+                            return None
+                    else:
+                        return None
                 else:
                     return None
             # Специальная обработка для FIND_BY_DISEASE

@@ -640,6 +640,9 @@ def extract_symptoms(message: str) -> List[str]:
 def normalize_symptom(raw: str) -> Optional[str]:
     """
     Нормализует симптом, приводя к стандартному названию.
+    
+    ВАЖНО: Возвращает симптом ТОЛЬКО если он найден в словаре SYMPTOM_STEMS.
+    Это предотвращает ложные срабатывания на не-медицинские тексты.
     """
     if not raw:
         return None
@@ -648,13 +651,13 @@ def normalize_symptom(raw: str) -> Optional[str]:
     if not cleaned:
         return None
     
-    # Ищем в словаре симптомов
+    # Ищем в словаре симптомов - возвращаем ТОЛЬКО если нашли
     for stem, symptom_name in SYMPTOM_STEMS.items():
         if stem in cleaned:
             return symptom_name
     
-    # Если не нашли в словаре, возвращаем очищенный вариант
-    return cleaned
+    # Если не нашли в словаре медицинских терминов - это НЕ симптом
+    return None
 
 
 def find_symptom_by_stem(text: str) -> Optional[str]:
