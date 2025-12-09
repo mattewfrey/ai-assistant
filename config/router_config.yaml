@@ -594,7 +594,7 @@ intents:
 # =============================================================================
   FIND_BY_SYMPTOM:
     channel: data
-    priority: 40
+    priority: 38
     triggers:
       # Прямые указания на симптом
       - "болит"
@@ -678,7 +678,7 @@ intents:
 
   FIND_BY_DISEASE:
     channel: data
-    priority: 38
+    priority: 42
     triggers:
       # Общие
       - "при диагнозе"
@@ -764,6 +764,9 @@ intents:
       - "цетиризин"
       - "дротаверин"
       - "метформин"
+    entity_types:
+      - inn
+    extract_inn_from_trigger: true
 
   FIND_ANALOGS:
     channel: data

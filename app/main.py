@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -37,8 +38,8 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    @app.get("/health")
-    async def health() -> dict[str, any]:
+    @app.get("/health", response_model=None)
+    async def health() -> dict[str, Any]:
         """Health check endpoint with dependency status."""
         checks = {
             "config_loaded": True,

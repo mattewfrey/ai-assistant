@@ -294,13 +294,19 @@ class RouterService:
             if match_result and match_result.matched:
                 candidates.append((match_result, rule.priority))
         
-        # Уровень 2: Симптомный/болезневой детектор (если не нашли выше)
+        # Уровень 2: Детектор болезней (сначала болезни, т.к. они более специфичны)
+        if not candidates:
+            disease_result = self._detect_disease_query(message, normalized, user_profile, dialog_state)
+            if disease_result and disease_result.matched:
+                candidates.append((disease_result, 42))  # Приоритет как у FIND_BY_DISEASE
+        
+        # Уровень 3: Симптомный детектор (только если болезни не найдены)
         if not candidates:
             symptom_result = self._detect_symptom_query(message, normalized, user_profile, dialog_state)
             if symptom_result and symptom_result.matched:
-                candidates.append((symptom_result, 40))  # Приоритет как у FIND_BY_SYMPTOM
+                candidates.append((symptom_result, 38))  # Приоритет как у FIND_BY_SYMPTOM
         
-        # Уровень 3: Детектор товарных запросов (если все еще пусто)
+        # Уровень 4: Детектор товарных запросов (если все еще пусто)
         if not candidates:
             product_result = self._detect_product_query(message, normalized, user_profile, dialog_state)
             if product_result and product_result.matched:
@@ -475,6 +481,59 @@ class RouterService:
             slots=slots,
             missing_slots=missing_slots,
             slot_questions=symptom_rule.slot_questions if symptom_rule else {},
+            confidence=confidence,
+            router_matched=True,
+            match_info=match_info,
+        )
+
+    def _detect_disease_query(
+        self,
+        message: str,
+        normalized: str,
+        user_profile: UserProfile | None,
+        dialog_state: DialogState | None,
+    ) -> RouterResult | None:
+        """
+        Детектор запросов по заболеваниям на основе словаря болезней.
+        """
+        # Извлекаем заболевания
+        diseases = extract_diseases(message)
+        if not diseases:
+            return None
+        
+        match_info = MatchInfo(
+            match_type="disease_detection",
+            matched_patterns=diseases[:3],
+        )
+        
+        slots = self._extract_slots(IntentType.FIND_BY_DISEASE, message, normalized, user_profile, dialog_state)
+        slots["disease"] = diseases[0]
+        if len(diseases) > 1:
+            slots["diseases"] = diseases
+        
+        # Ищем правило FIND_BY_DISEASE для получения slot_questions
+        disease_rule = next(
+            (r for r in self._rules if r.intent == IntentType.FIND_BY_DISEASE),
+            None
+        )
+        
+        required_slots = disease_rule.slots_required if disease_rule else ["disease"]
+        missing_slots = []
+        
+        if disease_rule:
+            missing_slots = self._get_missing_slots(disease_rule, slots, required_slots)
+        
+        confidence = 0.88 if diseases else 0.75
+        if slots.get("age"):
+            confidence = min(confidence + 0.1, 0.98)
+        
+        return RouterResult(
+            matched=True,
+            intent=IntentType.FIND_BY_DISEASE,
+            channel=ActionChannel.DATA,
+            slots=slots,
+            missing_slots=missing_slots,
+            slot_questions=disease_rule.slot_questions if disease_rule else {},
             confidence=confidence,
             router_matched=True,
             match_info=match_info,

@@ -196,8 +196,8 @@ def build_intent_prompt(schema_hint: str) -> ChatPromptTemplate:
     Returns:
         ChatPromptTemplate для LangChain
     """
-    # Экранируем фигурные скобки в схеме
-    escaped_schema = schema_hint.replace("{", "{{").replace("}", "}}")
+    # Экранируем фигурные скобки в схеме (4x для f-string -> LangChain)
+    escaped_schema = schema_hint.replace("{", "{{{{").replace("}", "}}}}")
     
     system_message = f"""Ты — AI-ассистент аптечной сети, встроенный в чат e-commerce платформы.
 
@@ -232,57 +232,57 @@ def build_intent_prompt(schema_hint: str) -> ChatPromptTemplate:
 
 ### Пример 1: Симптом
 Вход: "Болит голова, что посоветуете?"
-{{
-  "reply": {{"text": "Подберу препараты от головной боли. Уточните, пожалуйста, возраст — это важно для безопасной дозировки."}},
-  "actions": [{{
+{{{{
+  "reply": {{{{"text": "Подберу препараты от головной боли. Уточните, пожалуйста, возраст — это важно для безопасной дозировки."}}}},
+  "actions": [{{{{
     "type": "CALL_PLATFORM_API",
     "intent": "FIND_BY_SYMPTOM",
     "channel": "data",
-    "parameters": {{"symptom": "головная боль"}}
-  }}],
-  "meta": {{
+    "parameters": {{{{"symptom": "головная боль"}}}}
+  }}}}],
+  "meta": {{{{
     "top_intent": "FIND_BY_SYMPTOM",
     "confidence": 0.9
-  }}
-}}
+  }}}}
+}}}}
 
 ### Пример 2: Корзина
 Вход: "Покажи мою корзину"
-{{
-  "reply": {{"text": "Показываю вашу корзину."}},
-  "actions": [{{
+{{{{
+  "reply": {{{{"text": "Показываю вашу корзину."}}}},
+  "actions": [{{{{
     "type": "CALL_PLATFORM_API",
     "intent": "SHOW_CART",
     "channel": "navigation",
-    "parameters": {{}}
-  }}],
-  "meta": {{
+    "parameters": {{{{}}}}
+  }}}}],
+  "meta": {{{{
     "top_intent": "SHOW_CART",
     "confidence": 0.98
-  }}
-}}
+  }}}}
+}}}}
 
 ### Пример 3: Поиск товара с фильтрами
 Вход: "Нурофен для ребенка 5 лет в сиропе до 500 рублей"
-{{
-  "reply": {{"text": "Ищу Нурофен в форме сиропа для ребёнка 5 лет до 500₽."}},
-  "actions": [{{
+{{{{
+  "reply": {{{{"text": "Ищу Нурофен в форме сиропа для ребёнка 5 лет до 500₽."}}}},
+  "actions": [{{{{
     "type": "CALL_PLATFORM_API",
     "intent": "FIND_PRODUCT_BY_NAME",
     "channel": "data",
-    "parameters": {{
+    "parameters": {{{{
       "name": "Нурофен",
       "age": 5,
       "dosage_form": "syrup",
       "price_max": 500,
       "is_for_children": true
-    }}
-  }}],
-  "meta": {{
+    }}}}
+  }}}}],
+  "meta": {{{{
     "top_intent": "FIND_PRODUCT_BY_NAME",
     "confidence": 0.95
-  }}
-}}
+  }}}}
+}}}}
 """
 
     user_template = """## Запрос пользователя
@@ -354,7 +354,7 @@ def build_disambiguation_prompt(candidates: list[str]) -> ChatPromptTemplate:
 Кандидаты: {candidates_str}
 
 Выбери ОДИН наиболее подходящий интент и верни JSON:
-{{"intent": "ВЫБРАННЫЙ_ИНТЕНТ", "confidence": 0.X, "reason": "краткое объяснение"}}"""
+{{{{"intent": "ВЫБРАННЫЙ_ИНТЕНТ", "confidence": 0.X, "reason": "краткое объяснение"}}}}"""
 
     user_template = """Сообщение пользователя: {message}
 Контекст диалога: {dialog_state_json}

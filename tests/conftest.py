@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import pytest
 
+# Import directly from submodules to avoid triggering app creation
 from app.config import Settings
 from app.models import ChatRequest, UIState, UserPreferences, UserProfile
-from app.services.mock_platform import MockPlatform
-from app.services.platform_client import PlatformApiClient
 
 
 @pytest.fixture
@@ -17,14 +16,16 @@ def settings() -> Settings:
 
 
 @pytest.fixture
-def platform_client(settings: Settings) -> PlatformApiClient:
+def platform_client(settings: Settings):
     """Platform client instance."""
+    from app.services.platform_client import PlatformApiClient
     return PlatformApiClient(settings)
 
 
 @pytest.fixture
-def mock_platform() -> MockPlatform:
+def mock_platform():
     """Mock platform instance."""
+    from app.services.mock_platform import MockPlatform
     return MockPlatform()
 
 
