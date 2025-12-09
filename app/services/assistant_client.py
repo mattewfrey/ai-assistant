@@ -10,11 +10,11 @@ from ..models.assistant import AssistantMeta, AssistantResponse, Reply
 from .conversation_store import ConversationStore, get_conversation_store
 from .dialog_state_store import DialogStateStore, get_dialog_state_store
 from .debug_meta import DebugMetaBuilder
-from .error_handling import LLMError
+from .errors import LLMError
 from .langchain_llm import LangchainLLMClient
-from .logging_utils import log_info, log_warning
 from .metrics import get_metrics_service
 from .user_profile_store import UserProfileStore, get_user_profile_store
+from ..utils.logging import get_request_logger
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +26,18 @@ class AssistantClientError(LLMError):
 _PREFERENCE_KEYWORDS: Dict[str, List[str]] = {
     "sugar_free": ["без сахара", "сахар не добавляй", "sugar-free", "sugar free"],
     "lactose_free": ["без лактозы", "lactose-free", "lactose free"],
-    "for_children": ["для ребенка", "для ребёнка", "для детей", "детский", "kid"],
-    "has_children": ["у меня дети", "есть дети", "двое детей", "сын", "дочь"],
+    "for_children": [
+        "для ребенка",
+        "для ребёнка",
+        "для детей",
+        "детский",
+        "kid",
+        "у меня дети",
+        "есть дети",
+        "детям",
+        "сын",
+        "дочь",
+    ],
 }
 
 _FORM_KEYWORDS: Dict[str, List[str]] = {
@@ -83,6 +93,13 @@ class AssistantClient:
         """Send the user message to ChatGPT and parse the structured reply."""
 
         conversation_id = request.conversation_id or ""
+        request_logger = get_request_logger(
+            logger,
+            trace_id=trace_id,
+            user_id=request.user_id,
+            conversation_id=conversation_id,
+        )
+        request_logger.info("User message received: %s", request.message)
         if not self._settings.openai_api_key:
             logger.warning(
                 "OPENAI_API_KEY is not set; returning fallback assistant response for conversation_id=%s",
@@ -93,19 +110,14 @@ class AssistantClient:
             await self._maybe_refresh_summary(conversation_id)
             if debug_builder:
                 debug_builder.set_llm_used(False).set_llm_cached(False)
-            log_warning(
-                logger,
-                "LLM unavailable (no API key), returning fallback response",
-                trace_id=trace_id,
-                user_id=request.user_id,
-                conversation_id=conversation_id,
-            )
+            request_logger.warning("LLM unavailable (no API key), using fallback backend")
             return fallback
 
         user_profile: UserProfile | None = None
         if request.user_id:
             self._auto_capture_preferences(request.user_id, request.message)
             user_profile = self._user_profile_store.get_or_create(request.user_id)
+        preference_summary = self._build_preference_summary(user_profile)
 
         dialog_state = self._dialog_state_store.get_state(conversation_id)
 
@@ -114,6 +126,7 @@ class AssistantClient:
                 llm_result = await self._langchain_client.parse_intent(
                     message=request.message,
                     profile=user_profile.model_dump() if user_profile else None,
+                    preference_summary=preference_summary,
                     dialog_state=dialog_state,
                     ui_state=request.ui_state.model_dump() if request.ui_state else None,
                     available_intents=intents,
@@ -138,13 +151,13 @@ class AssistantClient:
                     )
                 self._record_exchange(conversation_id, request.message, assistant_response.reply.text)
                 await self._maybe_refresh_summary(conversation_id)
-                log_info(
-                    logger,
-                    "LLM parse_intent completed",
-                    trace_id=trace_id,
-                    user_id=request.user_id,
-                    conversation_id=conversation_id,
-                    intent=assistant_response.actions[0].intent if assistant_response.actions else None,
+                intents_found = [
+                    getattr(action.intent, "value", action.intent) for action in assistant_response.actions
+                ]
+                request_logger.info(
+                    "LLM parse_intent completed backend=langchain cached=%s intents=%s",
+                    llm_result.cached,
+                    intents_found,
                 )
                 return assistant_response
             except Exception as exc:  # pragma: no cover - safety fallback
@@ -159,13 +172,7 @@ class AssistantClient:
         await self._maybe_refresh_summary(conversation_id)
         if debug_builder:
             debug_builder.set_llm_used(False).set_llm_cached(False)
-        log_warning(
-            logger,
-            "LLM parse_intent failed or unavailable, using fallback",
-            trace_id=trace_id,
-            user_id=request.user_id,
-            conversation_id=conversation_id,
-        )
+        request_logger.warning("LLM parse_intent failed or unavailable, backend=fallback")
         return fallback
 
     async def beautify_reply(
@@ -285,14 +292,12 @@ class AssistantClient:
         for field, keywords in _PREFERENCE_KEYWORDS.items():
             if any(keyword in text for keyword in keywords):
                 updates[field] = True
-                if field == "for_children":
-                    updates.setdefault("has_children", True)
         preferred_forms: List[str] = []
         for form, keywords in _FORM_KEYWORDS.items():
             if any(keyword in text for keyword in keywords):
                 preferred_forms.append(form)
         if preferred_forms:
-            updates["preferred_dosage_forms"] = preferred_forms
+            updates["preferred_forms"] = preferred_forms
         age_match = _AGE_PATTERN.search(message)
         if age_match:
             try:
@@ -302,10 +307,44 @@ class AssistantClient:
         price_match = _PRICE_PATTERN.search(message)
         if price_match:
             try:
-                updates["default_max_price"] = int(price_match.group("price"))
+                updates["default_max_price"] = float(price_match.group("price"))
             except ValueError:
                 pass
         return updates
+
+    def _build_preference_summary(self, profile: UserProfile | None) -> str:
+        """Human-readable summary for prompt conditioning."""
+
+        if not profile or not profile.preferences:
+            return ""
+        prefs = profile.preferences
+        parts: list[str] = []
+        if prefs.age:
+            parts.append(f"{prefs.age} лет")
+        preferred_forms = prefs.preferred_forms or []
+        if preferred_forms:
+            forms = ", ".join(str(form).strip().lower() for form in preferred_forms if str(form).strip())
+            if forms:
+                parts.append(f"предпочитает {forms}")
+        if prefs.default_max_price is not None:
+            parts.append(f"до {self._format_price(prefs.default_max_price)}")
+        if prefs.sugar_free:
+            parts.append("без сахара")
+        if prefs.lactose_free:
+            parts.append("без лактозы")
+        if prefs.for_children:
+            parts.append("для детей")
+        return ", ".join(parts)
+
+    @staticmethod
+    def _format_price(price: float) -> str:
+        try:
+            value = float(price)
+        except (TypeError, ValueError):
+            return str(price)
+        if value.is_integer():
+            return f"{int(value)}₽"
+        return f"{value:.2f}₽"
 
     def _attach_llm_debug(
         self,

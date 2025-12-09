@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +15,8 @@ from .dialog_state_store import DialogStateStore, get_dialog_state_store
 from .debug_meta import DebugMetaBuilder
 from .router import CONFIG_PATH, RouterResult
 from .user_profile_store import UserProfile, UserProfileStore, get_user_profile_store
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -204,13 +207,13 @@ class SlotManager:
         if form is not None:
             slots["dosage_form"] = form
             if user_profile:
-                existing = user_profile.preferences.preferred_dosage_forms or []
+                existing = user_profile.preferences.preferred_forms or []
                 updated_forms = list(existing)
                 if form not in updated_forms:
                     updated_forms.append(form)
                 self._user_profile_store.update_preferences(
                     user_profile.user_id,
-                    preferred_dosage_forms=updated_forms,
+                    preferred_forms=updated_forms,
                 )
         return slots
 
@@ -223,7 +226,7 @@ class SlotManager:
         default_price = getattr(prefs, "default_max_price", None)
         if not slots.get("price_max") and default_price is not None:
             slots["price_max"] = default_price
-        preferred_forms = getattr(prefs, "preferred_dosage_forms", None) or []
+        preferred_forms = getattr(prefs, "preferred_forms", None) or []
         if not slots.get("dosage_form") and preferred_forms:
             slots["dosage_form"] = preferred_forms[0]
         return slots

@@ -66,10 +66,10 @@ def basic_profile() -> UserProfile:
 
 @pytest.fixture
 def profile_with_children() -> UserProfile:
-    """User profile with has_children=True."""
+    """User profile with for_children=True."""
     return UserProfile(
         user_id="user-test",
-        preferences=UserPreferences(has_children=True),
+        preferences=UserPreferences(for_children=True),
     )
 
 
@@ -83,7 +83,6 @@ def profile_with_preferences() -> UserProfile:
             lactose_free=True,
             for_children=False,
             age=35,
-            region="MOW",
             default_max_price=1000,
             preferred_forms=["таблетки", "капсулы"],
         ),

@@ -33,6 +33,7 @@ class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     conversation_id: Optional[str] = None
+    trace_id: Optional[str] = None
     message: str
     user_id: Optional[str] = None
     source: Optional[str] = None
@@ -43,24 +44,20 @@ class ChatRequest(BaseModel):
 class UserPreferences(BaseModel):
     """User-specific filters collected from prior interactions."""
 
-    sugar_free: Optional[bool] = None
-    lactose_free: Optional[bool] = None
-    for_children: Optional[bool] = None
-    gender: Optional[str] = None
     age: Optional[int] = None
-    region: Optional[str] = None
-    default_max_price: Optional[int] = Field(
+    default_max_price: Optional[float] = Field(
         default=None,
         validation_alias=AliasChoices("default_max_price", "price_ceiling"),
         serialization_alias="default_max_price",
     )
-    has_children: Optional[bool] = None
-    preferred_dosage_forms: Optional[List[str]] = Field(
+    preferred_forms: Optional[List[str]] = Field(
         default=None,
-        validation_alias=AliasChoices("preferred_dosage_forms", "preferred_forms"),
-        serialization_alias="preferred_dosage_forms",
+        validation_alias=AliasChoices("preferred_forms", "preferred_dosage_forms"),
+        serialization_alias="preferred_forms",
     )
-    preferred_brands: Optional[List[str]] = None
+    sugar_free: Optional[bool] = None
+    lactose_free: Optional[bool] = None
+    for_children: Optional[bool] = None
 
 
 class UserProfile(BaseModel):

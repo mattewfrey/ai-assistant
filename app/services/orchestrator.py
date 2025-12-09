@@ -34,6 +34,7 @@ from .slot_manager import SlotManager
 from .router import RouterResult
 from .static_responses import get_legal_response, is_legal_intent
 from .user_profile_store import UserProfileStore, get_user_profile_store
+from ..utils.logging import get_request_logger
 
 logger = logging.getLogger(__name__)
 
@@ -321,6 +322,12 @@ class Orchestrator:
         trace_id: str | None,
     ) -> ChatResponse:
         conversation_id = request.conversation_id or ""
+        request_logger = get_request_logger(
+            logger,
+            trace_id=trace_id,
+            user_id=request.user_id,
+            conversation_id=conversation_id,
+        )
         platform_data = DataPayload()
         aggregated_products: List[Dict[str, Any]] = []
         product_query_attempted = False
@@ -351,12 +358,14 @@ class Orchestrator:
         confidence = meta.confidence
         threshold = self._settings.assistant_min_confidence
         low_confidence = confidence is not None and confidence < threshold
-        user_profile: UserProfile | None = None
         user_id = (request.user_id or "").strip()
+        actions = list(assistant_response.actions)
+        if user_id and actions:
+            self._capture_preferences_from_actions(user_id, actions)
+        user_profile: UserProfile | None = None
         if user_id:
             user_profile = self._user_profile_store.get_or_create(user_id)
 
-        actions = list(assistant_response.actions)
         top_intent = actions[0].intent if actions and actions[0].intent else None
         channel = self._resolve_channel(actions[0]) if actions else None
         if meta and meta.debug:
@@ -366,18 +375,25 @@ class Orchestrator:
                 builder.set_pending_slots(bool(meta.debug.get("slot_prompt_pending")))
         builder.set_trace_id(trace_id)
         builder.add_intent(getattr(top_intent, "value", None))
-        log_info(
-            logger,
-            "Building chat response",
-            trace_id=trace_id,
-            user_id=request.user_id,
-            conversation_id=conversation_id,
-            intent=top_intent,
+        request_logger.info(
+            "Building chat response llm_used=%s backend=%s router_matched=%s actions=%s",
+            llm_used,
+            llm_backend,
+            router_matched,
+            [
+                {
+                    "type": getattr(action.type, "value", action.type),
+                    "intent": getattr(action.intent, "value", action.intent),
+                }
+                for action in actions
+            ],
         )
         top_category = get_intent_category(top_intent)
         symptom_missing_fields: List[str] = []
         if top_category == "symptom" and actions:
             symptom_missing_fields = _missing_symptom_parameters(actions[0].parameters)
+        if router_matched:
+            symptom_missing_fields = []
         needs_symptom_clarification = bool(symptom_missing_fields)
         navigation_mode = top_category == "navigation"
         skip_reason: str | None = None
@@ -391,9 +407,13 @@ class Orchestrator:
         executed_data_intents: set[IntentType] = set()
         pending_data_intents: set[IntentType] = set()
 
+        def _log_platform_call(method: str, params: Dict[str, Any] | None = None) -> None:
+            request_logger.info("Platform call %s params=%s", method, params or {})
+
         async def _fulfill_data_intent(intent: IntentType, parameters: Dict[str, Any]) -> None:
             if intent == IntentType.SHOW_CART:
-                cart_snapshot = await self._platform_client.show_cart(parameters, request)
+                _log_platform_call("show_cart", parameters)
+                cart_snapshot = await self._platform_client.show_cart(parameters, request, trace_id=trace_id)
                 if cart_snapshot:
                     platform_data.cart = cart_snapshot
                 return
@@ -401,8 +421,9 @@ class Orchestrator:
                 if not user_id:
                     logger.info("SHOW_PROFILE requested without user_id; skipping.")
                     return
-                profile = self._platform_client.get_user_profile(user_id)
-                addresses = self._platform_client.get_user_addresses(user_id)
+                _log_platform_call("get_user_profile", {"user_id": user_id})
+                profile = self._platform_client.get_user_profile(user_id, trace_id=trace_id)
+                addresses = self._platform_client.get_user_addresses(user_id, trace_id=trace_id)
                 if profile:
                     platform_data.user_profile = profile
                 if addresses:
@@ -412,19 +433,15 @@ class Orchestrator:
                 if not user_id:
                     logger.info("SHOW_FAVORITES requested without user_id; skipping.")
                     return
-                platform_data.favorites = self._platform_client.get_favorites(user_id)
+                _log_platform_call("get_favorites", {"user_id": user_id})
+                platform_data.favorites = self._platform_client.get_favorites(user_id, trace_id=trace_id)
 
         for action in actions:
             logger.info("Processing action type=%s intent=%s", action.type, action.intent)
             action_channel = self._resolve_channel(action)
             builder.add_intent(getattr(action.intent, "value", action.intent) if action.intent else None)
-            log_info(
-                logger,
-                "Processing action",
-                trace_id=trace_id,
-                user_id=request.user_id,
-                conversation_id=conversation_id,
-                intent=action.intent,
+            request_logger.info(
+                "Processing action type=%s intent=%s", getattr(action.type, "value", action.type), action.intent
             )
             if skip_reason and action.type == ActionType.CALL_PLATFORM_API:
                 logger.info("Skipping platform call due to %s (intent=%s)", skip_reason, action.intent)
@@ -475,24 +492,37 @@ class Orchestrator:
                 intent = action.intent
                 if intent and intent in PRODUCT_INTENTS:
                     product_query_attempted = True
+                    _log_platform_call(
+                        "fetch_products",
+                        {
+                            "intent": getattr(intent, "value", intent),
+                            "region": getattr(request.ui_state, "selected_region_id", None) if request.ui_state else None,
+                            "symptom": action.parameters.get("symptom"),
+                            "product_name": action.parameters.get("product_name") or action.parameters.get("name"),
+                        },
+                    )
                     products = await self._platform_client.fetch_products(
                         intent,
                         action.parameters,
                         request,
                         user_profile=user_profile,
+                        trace_id=trace_id,
                     )
                     if products:
                         aggregated_products.extend(products)
                     continue
                 if intent == IntentType.SHOW_NEARBY_PHARMACIES:
-                    pharmacies = self._platform_client.list_pharmacies(action.parameters)
+                    _log_platform_call("list_pharmacies", action.parameters)
+                    pharmacies = self._platform_client.list_pharmacies(action.parameters, trace_id=trace_id)
                     if pharmacies:
                         platform_data.pharmacies = pharmacies
                     continue
                 if intent in {IntentType.FIND_RECOMMENDATION, IntentType.FIND_POPULAR, IntentType.FIND_NEW}:
+                    _log_platform_call("get_recommendations", {"user_id": user_id, "context": action.parameters})
                     recommendations = self._platform_client.get_recommendations(
                         user_id=user_id or None,
                         context=action.parameters,
+                        trace_id=trace_id,
                     )
                     if recommendations:
                         platform_data.recommendations = recommendations
@@ -500,11 +530,13 @@ class Orchestrator:
                 if intent in DATA_DRIVEN_NAV_INTENTS:
                     executed_data_intents.add(intent)
                 if intent == IntentType.ADD_TO_CART:
-                    cart_snapshot = await self._platform_client.add_to_cart(action.parameters, request)
+                    _log_platform_call("add_to_cart", action.parameters)
+                    cart_snapshot = await self._platform_client.add_to_cart(action.parameters, request, trace_id=trace_id)
                     if cart_snapshot:
                         platform_data.cart = cart_snapshot
                     if action.parameters.get("refresh_cart", True):
-                        refreshed_cart = await self._platform_client.show_cart(action.parameters, request)
+                        _log_platform_call("show_cart", {"refresh": True})
+                        refreshed_cart = await self._platform_client.show_cart(action.parameters, request, trace_id=trace_id)
                         if refreshed_cart:
                             platform_data.cart = refreshed_cart
                     continue
@@ -519,7 +551,8 @@ class Orchestrator:
                     if not product_id:
                         logger.info("ADD_TO_FAVORITES missing product_id.")
                         continue
-                    platform_data.favorites = self._platform_client.add_favorite(user_id, product_id)
+                    _log_platform_call("add_favorite", {"user_id": user_id, "product_id": product_id})
+                    platform_data.favorites = self._platform_client.add_favorite(user_id, product_id, trace_id=trace_id)
                     continue
                 if intent == IntentType.REMOVE_FROM_FAVORITES:
                     if not user_id:
@@ -529,23 +562,38 @@ class Orchestrator:
                     if not product_id:
                         logger.info("REMOVE_FROM_FAVORITES missing product_id.")
                         continue
-                    platform_data.favorites = self._platform_client.remove_favorite(user_id, product_id)
+                    _log_platform_call("remove_favorite", {"user_id": user_id, "product_id": product_id})
+                    platform_data.favorites = self._platform_client.remove_favorite(user_id, product_id, trace_id=trace_id)
                     continue
                 if intent == IntentType.SHOW_ACTIVE_ORDERS:
                     if not user_id:
                         logger.info("SHOW_ACTIVE_ORDERS requested without user_id; skipping.")
                         continue
-                    orders = self._platform_client.get_orders(user_id, status="active")
+                    _log_platform_call("get_orders", {"user_id": user_id, "status": "active"})
+                    orders = self._platform_client.get_orders(user_id, status="active", trace_id=trace_id)
                     _append_orders(orders)
                     continue
                 if intent == IntentType.SHOW_COMPLETED_ORDERS:
                     if not user_id:
                         logger.info("SHOW_COMPLETED_ORDERS requested without user_id; skipping.")
                         continue
-                    orders = self._platform_client.get_orders(user_id, status="completed")
+                    _log_platform_call("get_orders", {"user_id": user_id, "status": "completed"})
+                    orders = self._platform_client.get_orders(user_id, status="completed", trace_id=trace_id)
                     _append_orders(orders)
                     continue
-                result = await self._platform_client.dispatch(action, request, user_profile=user_profile)
+                _log_platform_call(
+                    "dispatch",
+                    {
+                        "intent": getattr(intent, "value", intent) if intent else None,
+                        "action_type": getattr(action.type, "value", action.type),
+                    },
+                )
+                result = await self._platform_client.dispatch(
+                    action,
+                    request,
+                    user_profile=user_profile,
+                    trace_id=trace_id,
+                )
                 platform_data.merge(result)
             elif action.type == ActionType.NEED_AUTH:
                 additional_notes.append("Нужно авторизоваться, чтобы продолжить действие.")
@@ -581,15 +629,21 @@ class Orchestrator:
             if not user_id or not platform_data.user_profile:
                 return
             if not platform_data.orders:
-                active_orders = self._platform_client.get_orders(user_id, status="active")
+                _log_platform_call("get_orders", {"user_id": user_id, "status": "active", "stage": "enrich_profile"})
+                active_orders = self._platform_client.get_orders(user_id, status="active", trace_id=trace_id)
                 _append_orders(active_orders)
             if not platform_data.orders:
-                completed_orders = self._platform_client.get_orders(user_id, status="completed")
+                _log_platform_call(
+                    "get_orders", {"user_id": user_id, "status": "completed", "stage": "enrich_profile"}
+                )
+                completed_orders = self._platform_client.get_orders(user_id, status="completed", trace_id=trace_id)
                 _append_orders(completed_orders[:2])
             if not platform_data.favorites:
-                platform_data.favorites = self._platform_client.get_favorites(user_id)
+                _log_platform_call("get_favorites", {"user_id": user_id, "stage": "enrich_profile"})
+                platform_data.favorites = self._platform_client.get_favorites(user_id, trace_id=trace_id)
             if platform_data.cart is None:
-                cart_snapshot = await self._platform_client.show_cart({}, request)
+                _log_platform_call("show_cart", {"reason": "enrich_profile"})
+                cart_snapshot = await self._platform_client.show_cart({}, request, trace_id=trace_id)
                 if cart_snapshot:
                     platform_data.cart = cart_snapshot
 
@@ -599,6 +653,7 @@ class Orchestrator:
             platform_data.recommendations = self._platform_client.get_recommendations(
                 user_id=user_id,
                 context={"reason": "recent_purchases_fallback"},
+                trace_id=trace_id,
             )
 
         reply = assistant_response.reply
@@ -696,6 +751,20 @@ class Orchestrator:
         builder.set_router_matched(router_matched)
         if llm_backend:
             builder.add_extra("llm_backend", llm_backend if llm_used else None)
+
+        # Apply price filter to recommendations if provided in actions
+        price_limit: float | None = None
+        for action in actions:
+            params = action.parameters or {}
+            price_limit = self._extract_price_from_params(params)
+            if price_limit is not None:
+                break
+        if price_limit is not None and platform_data.recommendations:
+            platform_data.recommendations = [
+                rec
+                for rec in platform_data.recommendations
+                if rec.get("price") is None or rec.get("price") <= price_limit
+            ]
 
         # Finalize source if not set explicitly
         debug_snapshot = builder.build()
@@ -838,6 +907,51 @@ class Orchestrator:
             context_products=platform_data.products,
             last_reply=reply.text,
         )
+
+    def _capture_preferences_from_actions(self, user_id: str, actions: List[AssistantAction]) -> None:
+        """Persist explicit numeric preferences extracted by LLM actions."""
+
+        updates: Dict[str, Any] = {}
+        for action in actions:
+            params = action.parameters or {}
+            age = self._extract_age_from_params(params)
+            if age is not None:
+                updates["age"] = age
+            price = self._extract_price_from_params(params)
+            if price is not None:
+                updates["default_max_price"] = price
+        if updates:
+            self._user_profile_store.update_preferences(user_id, **updates)
+
+    def _extract_age_from_params(self, params: Dict[str, Any]) -> int | None:
+        if "age" not in params:
+            return None
+        raw = params.get("age")
+        try:
+            age = int(raw)
+        except (TypeError, ValueError):
+            return None
+        if 0 < age <= 110:
+            return age
+        return None
+
+    def _extract_price_from_params(self, params: Dict[str, Any]) -> float | None:
+        price_keys = ("price_max", "max_price", "budget", "default_max_price")
+        upper_bound = getattr(self._settings, "price_max_upper_bound", None)
+        for key in price_keys:
+            if key not in params:
+                continue
+            raw = params.get(key)
+            try:
+                price = float(raw)
+            except (TypeError, ValueError):
+                continue
+            if price <= 0:
+                continue
+            if upper_bound is not None and price > upper_bound:
+                price = upper_bound
+            return price
+        return None
 
     def _resolve_channel(self, action: AssistantAction) -> ActionChannel:
         if action.channel:

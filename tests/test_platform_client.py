@@ -28,8 +28,6 @@ def test_filter_products_respects_price_max(settings, basic_request):
     assert "p3" not in {p.id for p in filtered}
 """Tests for PlatformApiClient handlers."""
 
-from __future__ import annotations
-
 import pytest
 
 from app.config import Settings
@@ -49,6 +47,18 @@ async def test_price_max_filters_products(platform_client: PlatformApiClient, ba
 
     assert results, "Expected some products within price limit"
     assert all(product.price <= 400 for product in results if product.price is not None)
+
+
+@pytest.mark.asyncio
+async def test_default_price_from_profile_used_when_missing_param(
+    platform_client: PlatformApiClient, basic_request: ChatRequest
+) -> None:
+    profile = UserProfile(user_id="budget-user", preferences=UserPreferences(default_max_price=350))
+
+    results = await platform_client.find_by_symptom({"symptom": "кашель"}, basic_request, profile)
+
+    assert results, "Expected products respecting profile budget"
+    assert all(product.price is None or product.price <= 350 for product in results)
 
 
 @pytest.mark.asyncio
@@ -445,7 +455,7 @@ async def test_book_product_pickup_success(
 async def test_children_products_prioritized(
     platform_client: PlatformApiClient, basic_request: ChatRequest, profile_with_children: UserProfile
 ) -> None:
-    """Test that children products are prioritized when has_children=True."""
+    """Test that children products are prioritized when for_children=True."""
     results = await platform_client.find_by_symptom({"symptom": "кашель"}, basic_request, profile_with_children)
 
     assert results, "Expected products"

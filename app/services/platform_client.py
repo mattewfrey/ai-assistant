@@ -11,7 +11,8 @@ from pydantic import BaseModel, Field, ValidationError
 from ..config import Settings
 from ..intents import IntentType
 from ..models import AssistantAction, ChatRequest, DataPayload, UserProfile
-from .error_handling import UpstreamError
+from ..utils.logging import get_request_logger
+from .errors import UpstreamError
 from .mock_platform import MockPlatform
 from .cache import get_caching_service
 
@@ -89,16 +90,33 @@ class PlatformApiClient:
         self._mock = MockPlatform()
         self._cache = get_caching_service()
 
-    def get_user_profile(self, user_id: str) -> Dict[str, Any] | None:
+    def _logger(
+        self,
+        *,
+        trace_id: str | None,
+        request: ChatRequest | None = None,
+        user_id: str | None = None,
+    ):
+        return get_request_logger(
+            logger,
+            trace_id=trace_id,
+            user_id=user_id or (request.user_id if request else None),
+            conversation_id=request.conversation_id if request else None,
+        )
+
+    def get_user_profile(self, user_id: str, trace_id: str | None = None) -> Dict[str, Any] | None:
+        self._logger(trace_id=trace_id, user_id=user_id).info("platform.get_user_profile user_id=%s", user_id)
         return self._mock.get_user_profile(user_id)
 
-    def get_user_addresses(self, user_id: str) -> List[Dict[str, Any]]:
+    def get_user_addresses(self, user_id: str, trace_id: str | None = None) -> List[Dict[str, Any]]:
+        self._logger(trace_id=trace_id, user_id=user_id).info("platform.get_user_addresses user_id=%s", user_id)
         return self._mock.get_user_addresses(user_id)
 
-    def get_pharmacy(self, pharmacy_id: str) -> Dict[str, Any] | None:
+    def get_pharmacy(self, pharmacy_id: str, trace_id: str | None = None) -> Dict[str, Any] | None:
+        self._logger(trace_id=trace_id, user_id=None).info("platform.get_pharmacy pharmacy_id=%s", pharmacy_id)
         return self._mock.get_pharmacy(pharmacy_id)
 
-    def list_pharmacies(self, parameters: Dict[str, Any] | None = None) -> List[Dict[str, Any]]:
+    def list_pharmacies(self, parameters: Dict[str, Any] | None = None, trace_id: str | None = None) -> List[Dict[str, Any]]:
         """
         TODO: Replace with geo-aware pharmacy discovery service.
         """
@@ -109,25 +127,39 @@ class PlatformApiClient:
                 limit = int(parameters.get("limit", limit))
             except (TypeError, ValueError):
                 pass
+        self._logger(trace_id=trace_id, user_id=None).info("platform.list_pharmacies limit=%s", limit)
         return self._mock.list_pharmacies(limit=limit)
 
-    def get_favorites(self, user_id: str) -> List[Dict[str, Any]]:
+    def get_favorites(self, user_id: str, trace_id: str | None = None) -> List[Dict[str, Any]]:
         favorites = self._mock.get_favorites(user_id)
+        self._logger(trace_id=trace_id, user_id=user_id).info("platform.get_favorites user_id=%s count=%s", user_id, len(favorites))
         return self._serialize_products(favorites)
 
-    def add_favorite(self, user_id: str, product_id: str) -> List[Dict[str, Any]]:
+    def add_favorite(self, user_id: str, product_id: str, trace_id: str | None = None) -> List[Dict[str, Any]]:
+        self._logger(trace_id=trace_id, user_id=user_id).info(
+            "platform.add_favorite user_id=%s product_id=%s", user_id, product_id
+        )
         favorites = self._mock.add_favorite(user_id, product_id)
         return self._serialize_products(favorites)
 
-    def remove_favorite(self, user_id: str, product_id: str) -> List[Dict[str, Any]]:
+    def remove_favorite(self, user_id: str, product_id: str, trace_id: str | None = None) -> List[Dict[str, Any]]:
+        self._logger(trace_id=trace_id, user_id=user_id).info(
+            "platform.remove_favorite user_id=%s product_id=%s", user_id, product_id
+        )
         favorites = self._mock.remove_favorite(user_id, product_id)
         return self._serialize_products(favorites)
 
-    def get_orders(self, user_id: str, status: str | None = None) -> List[Dict[str, Any]]:
+    def get_orders(self, user_id: str, status: str | None = None, trace_id: str | None = None) -> List[Dict[str, Any]]:
+        self._logger(trace_id=trace_id, user_id=user_id).info(
+            "platform.get_orders user_id=%s status=%s", user_id, status
+        )
         orders = self._mock.get_orders(user_id, status=status)
         return [self._serialize_order(order) for order in orders]
 
-    def get_recent_purchases(self, user_id: str, limit: int = 5) -> List[Dict[str, Any]]:
+    def get_recent_purchases(self, user_id: str, limit: int = 5, trace_id: str | None = None) -> List[Dict[str, Any]]:
+        self._logger(trace_id=trace_id, user_id=user_id).info(
+            "platform.get_recent_purchases user_id=%s limit=%s", user_id, limit
+        )
         return self._mock.get_recent_purchases(user_id, limit=limit)
 
     def get_recommendations(
@@ -135,11 +167,18 @@ class PlatformApiClient:
         user_id: str | None,
         context: Dict[str, Any] | None = None,
         limit: int = 5,
+        trace_id: str | None = None,
     ) -> List[Dict[str, Any]]:
         """
         TODO: Integrate with recommendation service.
         """
 
+        self._logger(trace_id=trace_id, user_id=user_id).info(
+            "platform.get_recommendations user_id=%s context=%s limit=%s",
+            user_id,
+            (context or {}),
+            limit,
+        )
         if user_id:
             recent = self._mock.get_recent_purchases(user_id, limit=limit)
             if recent:
@@ -154,16 +193,16 @@ class PlatformApiClient:
         user_id: str | None,
         issue: str,
         payload: Dict[str, Any],
+        trace_id: str | None = None,
     ) -> Dict[str, Any]:
         """
         TODO: Send the ticket to the real customer-support system.
         """
 
         ticket_id = f"SUP-{uuid.uuid4().hex[:8]}"
-        logger.info(
-            "Support ticket created placeholder ticket_id=%s user_id=%s conversation_id=%s issue=%s",
+        self._logger(trace_id=trace_id, user_id=user_id).info(
+            "platform.create_support_ticket ticket_id=%s conversation_id=%s issue=%s",
             ticket_id,
-            user_id,
             conversation_id,
             issue,
         )
@@ -180,20 +219,27 @@ class PlatformApiClient:
         request: ChatRequest,
         *,
         user_profile: UserProfile | None = None,
+        trace_id: str | None = None,
     ) -> DataPayload:
         """Route action to platform-specific handler."""
 
         intent = action.intent
         if not intent:
-            logger.info("Action %s does not specify an intent; skipping.", action.type)
+            self._logger(trace_id=trace_id, request=request).info(
+                "platform.dispatch missing_intent action_type=%s", action.type
+            )
             return DataPayload()
 
+        self._logger(trace_id=trace_id, request=request).info(
+            "platform.dispatch intent=%s action_type=%s", intent, action.type
+        )
         if intent in self._PRODUCT_INTENTS:
             products = await self.fetch_products(
                 intent,
                 action.parameters,
                 request,
                 user_profile=user_profile,
+                trace_id=trace_id,
             )
             return DataPayload(products=products)
 
@@ -205,7 +251,7 @@ class PlatformApiClient:
             IntentType.SHOW_DETAILED_PRODUCT_SPECIFICATIONS,
         }
         if intent in product_info_intents:
-            return await self._handle_product_info(intent, action.parameters, request)
+            return await self._handle_product_info(intent, action.parameters, request, trace_id=trace_id)
 
         # Product search handlers
         search_intents = {
@@ -215,7 +261,7 @@ class PlatformApiClient:
         }
         if intent in search_intents:
             handler = search_intents[intent]
-            products = await handler(action.parameters, request, user_profile)
+            products = await handler(action.parameters, request, user_profile, trace_id)
             return DataPayload(products=[p.model_dump() for p in products])
 
         # Pharmacy handlers
@@ -227,7 +273,7 @@ class PlatformApiClient:
             IntentType.SHOW_NEAREST_PHARMACY_WITH_PRODUCT,
         }
         if intent in pharmacy_intents:
-            return await self._handle_pharmacy(intent, action.parameters, request, user_profile)
+            return await self._handle_pharmacy(intent, action.parameters, request, user_profile, trace_id)
 
         # Order handlers
         order_intents = {
@@ -238,10 +284,12 @@ class PlatformApiClient:
             IntentType.SHOW_ORDER_DELIVERY_TIME,
         }
         if intent in order_intents:
-            return await self._handle_order(intent, action.parameters, request)
+            return await self._handle_order(intent, action.parameters, request, trace_id)
 
         # Cart handlers
-        cart_handlers: Dict[IntentType, Callable[[Dict[str, Any], ChatRequest], Awaitable[Dict[str, Any]]]] = {
+        cart_handlers: Dict[
+            IntentType, Callable[[Dict[str, Any], ChatRequest, str | None], Awaitable[Dict[str, Any]]]
+        ] = {
             IntentType.SHOW_CART: self.show_cart,
             IntentType.ADD_TO_CART: self.add_to_cart,
             IntentType.APPLY_PROMO_CODE: self.apply_promo_code,
@@ -249,7 +297,7 @@ class PlatformApiClient:
         }
         if intent in cart_handlers:
             handler = cart_handlers[intent]
-            payload = await handler(action.parameters, request)
+            payload = await handler(action.parameters, request, trace_id)
             return DataPayload(cart=payload)
 
         # User handlers
@@ -258,14 +306,16 @@ class PlatformApiClient:
             IntentType.SHOW_ACTIVE_COUPONS,
         }
         if intent in user_intents:
-            return await self._handle_user(intent, action.parameters, request)
+            return await self._handle_user(intent, action.parameters, request, trace_id)
 
         # Booking handler
         if intent == IntentType.BOOK_PRODUCT_PICKUP:
-            return await self.book_product_pickup(action.parameters, request)
+            return await self.book_product_pickup(action.parameters, request, trace_id)
 
         # Legacy handlers
-        handlers: Dict[IntentType, Callable[[Dict[str, Any], ChatRequest], Awaitable[Dict[str, Any]]]] = {
+        handlers: Dict[
+            IntentType, Callable[[Dict[str, Any], ChatRequest, str | None], Awaitable[Dict[str, Any]]]
+        ] = {
             IntentType.SHOW_ORDER_STATUS: self.show_order_status,
         }
 
@@ -274,7 +324,7 @@ class PlatformApiClient:
             logger.info("No platform handler defined for intent %s yet.", intent)
             return DataPayload()
 
-        payload = await handler(action.parameters, request)
+        payload = await handler(action.parameters, request, trace_id)
         if intent == IntentType.SHOW_ORDER_STATUS:
             return DataPayload(orders=[payload])
         return DataPayload()
@@ -287,6 +337,7 @@ class PlatformApiClient:
         request: ChatRequest,
         *,
         user_profile: UserProfile | None = None,
+        trace_id: str | None = None,
     ) -> List[Dict[str, Any]]:
         """Return serialized products for the given intent."""
 
@@ -295,9 +346,16 @@ class PlatformApiClient:
         if cached:
             return cached
 
+        self._logger(trace_id=trace_id, request=request).info(
+            "platform.fetch_products intent=%s region=%s symptom=%s product_name=%s",
+            intent,
+            getattr(request.ui_state, "selected_region_id", None) if request.ui_state else None,
+            parameters.get("symptom"),
+            parameters.get("product_name") or parameters.get("name"),
+        )
         handlers: Dict[
             IntentType,
-            Callable[[Dict[str, Any], ChatRequest, UserProfile | None], Awaitable[List[DataProduct]]],
+            Callable[[Dict[str, Any], ChatRequest, UserProfile | None, str | None], Awaitable[List[DataProduct]]],
         ] = {
             IntentType.FIND_BY_SYMPTOM: self.find_by_symptom,
             IntentType.SYMPTOM_TO_PRODUCT: self.find_by_symptom,
@@ -313,7 +371,7 @@ class PlatformApiClient:
             logger.info("No product handler registered for intent %s", intent)
             return []
 
-        products = await handler(parameters, request, user_profile)
+        products = await handler(parameters, request, user_profile, trace_id)
         serialized = [product.model_dump() for product in products]
         self._cache.set_product_results(cache_payload, serialized, ttl_seconds=600)
         return serialized
@@ -323,6 +381,7 @@ class PlatformApiClient:
         parameters: Dict[str, Any],
         request: ChatRequest,
         user_profile: UserProfile | None,
+        trace_id: str | None = None,
     ) -> List[DataProduct]:
         """
         Simulate `GET /search/symptom`.
@@ -331,6 +390,9 @@ class PlatformApiClient:
         """
 
         symptom = str(parameters.get("symptom") or parameters.get("query") or "").strip().lower()
+        self._logger(trace_id=trace_id, request=request).info(
+            "platform.find_by_symptom symptom=%s region=%s", symptom, getattr(request.ui_state, "selected_region_id", None) if request.ui_state else None
+        )
         candidates = self._mock_catalog()
         if symptom:
             candidates = [
@@ -340,7 +402,7 @@ class PlatformApiClient:
             ]
         meta_filters = parameters.get("meta_filters") or []
         price_limit = self._resolve_price_max(parameters, user_profile)
-        return self._post_process_products(
+        products = self._post_process_products(
             candidates,
             request,
             include_rx=bool(parameters.get("allow_rx")),
@@ -349,13 +411,23 @@ class PlatformApiClient:
             price_max=price_limit,
             intent=IntentType.FIND_BY_SYMPTOM,
             dosage_form=parameters.get("dosage_form"),
+            parameters=parameters,
         )
+        if not products:
+            fallback = [
+                product
+                for product in candidates
+                if price_limit is None or product.price is None or product.price <= price_limit
+            ]
+            products = fallback[:5]
+        return products
 
     async def find_by_disease(
         self,
         parameters: Dict[str, Any],
         request: ChatRequest,
         user_profile: UserProfile | None,
+        trace_id: str | None = None,
     ) -> List[DataProduct]:
         """
         Simulate `GET /search/disease`.
@@ -364,6 +436,11 @@ class PlatformApiClient:
         """
 
         disease = str(parameters.get("disease") or parameters.get("diagnosis") or "").strip().lower()
+        self._logger(trace_id=trace_id, request=request).info(
+            "platform.find_by_disease disease=%s region=%s",
+            disease,
+            getattr(request.ui_state, "selected_region_id", None) if request.ui_state else None,
+        )
         candidates = self._mock_catalog()
         if disease:
             candidates = [
@@ -382,6 +459,7 @@ class PlatformApiClient:
             price_max=price_limit,
             intent=IntentType.FIND_BY_DISEASE,
             dosage_form=parameters.get("dosage_form"),
+            parameters=parameters,
         )
 
     async def find_by_meta_filters(
@@ -389,6 +467,7 @@ class PlatformApiClient:
         parameters: Dict[str, Any],
         request: ChatRequest,
         user_profile: UserProfile | None,
+        trace_id: str | None = None,
     ) -> List[DataProduct]:
         """
         Simulate `GET /search/meta`.
@@ -397,6 +476,11 @@ class PlatformApiClient:
         """
 
         meta_filters = parameters.get("meta_filters") or parameters.get("filters") or []
+        self._logger(trace_id=trace_id, request=request).info(
+            "platform.find_by_meta_filters filters=%s region=%s",
+            meta_filters,
+            getattr(request.ui_state, "selected_region_id", None) if request.ui_state else None,
+        )
         candidates = self._mock_catalog()
         price_limit = self._resolve_price_max(parameters, user_profile)
         return self._post_process_products(
@@ -408,6 +492,7 @@ class PlatformApiClient:
             price_max=price_limit,
             intent=IntentType.FIND_BY_META_FILTERS,
             dosage_form=parameters.get("dosage_form"),
+            parameters=parameters,
         )
 
     async def find_by_category(
@@ -415,6 +500,7 @@ class PlatformApiClient:
         parameters: Dict[str, Any],
         request: ChatRequest,
         user_profile: UserProfile | None,
+        trace_id: str | None = None,
     ) -> List[DataProduct]:
         """
         Simulate `GET /search/category`.
@@ -426,6 +512,11 @@ class PlatformApiClient:
             str(parameters.get("category") or parameters.get("category_id") or parameters.get("category_slug") or "")
             .strip()
             .lower()
+        )
+        self._logger(trace_id=trace_id, request=request).info(
+            "platform.find_by_category category=%s region=%s",
+            category,
+            getattr(request.ui_state, "selected_region_id", None) if request.ui_state else None,
         )
         candidates = self._mock_catalog()
         if category:
@@ -444,6 +535,7 @@ class PlatformApiClient:
             price_max=price_limit,
             intent=IntentType.FIND_BY_CATEGORY,
             dosage_form=parameters.get("dosage_form"),
+            parameters=parameters,
         )
 
     async def find_by_name(
@@ -451,6 +543,7 @@ class PlatformApiClient:
         parameters: Dict[str, Any],
         request: ChatRequest,
         user_profile: UserProfile | None,
+        trace_id: str | None = None,
     ) -> List[DataProduct]:
         """
         Simulate `GET /search/by-name`.
@@ -459,6 +552,11 @@ class PlatformApiClient:
         """
 
         query = str(parameters.get("name") or parameters.get("product_name") or request.message or "").strip().lower()
+        self._logger(trace_id=trace_id, request=request).info(
+            "platform.find_by_name query=%s region=%s",
+            query,
+            getattr(request.ui_state, "selected_region_id", None) if request.ui_state else None,
+        )
         candidates = self._mock_catalog()
         if query:
             candidates = [
@@ -475,22 +573,26 @@ class PlatformApiClient:
             user_profile=user_profile,
             price_max=price_limit,
             intent=IntentType.FIND_PRODUCT_BY_NAME,
+            parameters=parameters,
         )
 
-    async def show_cart(self, parameters: Dict[str, Any], request: ChatRequest) -> Dict[str, Any]:
+    async def show_cart(self, parameters: Dict[str, Any], request: ChatRequest, trace_id: str | None = None) -> Dict[str, Any]:
         """
         Simulate `GET /cart/{cartId}`.
 
         TODO: integrate with the cart service using authenticated user tokens.
         """
 
+        self._logger(trace_id=trace_id, request=request).info(
+            "platform.show_cart selected_pharmacy=%s", getattr(request.ui_state, "selected_pharmacy_id", None) if request.ui_state else None
+        )
         cart = self._mock.get_cart(request.user_id)
         selected_pharmacy = request.ui_state.selected_pharmacy_id if request.ui_state else None
         if selected_pharmacy:
             cart["pharmacy_id"] = selected_pharmacy
         return self._serialize_cart(cart)
 
-    async def add_to_cart(self, parameters: Dict[str, Any], request: ChatRequest) -> Dict[str, Any]:
+    async def add_to_cart(self, parameters: Dict[str, Any], request: ChatRequest, trace_id: str | None = None) -> Dict[str, Any]:
         """
         Simulate `POST /cart/items`.
 
@@ -499,17 +601,23 @@ class PlatformApiClient:
 
         product_id = parameters.get("product_id")
         if not product_id:
-            return await self.show_cart(parameters, request)
+            return await self.show_cart(parameters, request, trace_id)
 
         qty = int(parameters.get("qty") or parameters.get("quantity") or 1)
         qty = max(qty, 1)
+        self._logger(trace_id=trace_id, request=request).info(
+            "platform.add_to_cart product_id=%s qty=%s pharmacy=%s",
+            product_id,
+            qty,
+            getattr(request.ui_state, "selected_pharmacy_id", None) if request.ui_state else None,
+        )
         cart = self._mock.add_to_cart(request.user_id, product_id, qty)
         selected_pharmacy = request.ui_state.selected_pharmacy_id if request.ui_state else None
         if selected_pharmacy:
             cart["pharmacy_id"] = selected_pharmacy
         return self._serialize_cart(cart)
 
-    async def show_order_status(self, parameters: Dict[str, Any], request: ChatRequest) -> Dict[str, Any]:
+    async def show_order_status(self, parameters: Dict[str, Any], request: ChatRequest, trace_id: str | None = None) -> Dict[str, Any]:
         """
         Simulate `GET /orders/{orderId}`.
 
@@ -517,6 +625,9 @@ class PlatformApiClient:
         """
 
         order_id = str(parameters.get("order_id") or "").strip()
+        self._logger(trace_id=trace_id, request=request).info(
+            "platform.show_order_status order_id=%s", order_id or "auto"
+        )
         order: Dict[str, Any] | None = None
         if order_id:
             order = self._mock.get_order_by_id(order_id)
@@ -550,13 +661,16 @@ class PlatformApiClient:
     # Product Info Handlers
     # -------------------------------------------------------------------------
     async def _handle_product_info(
-        self, intent: IntentType, parameters: Dict[str, Any], request: ChatRequest
+        self, intent: IntentType, parameters: Dict[str, Any], request: ChatRequest, trace_id: str | None = None
     ) -> DataPayload:
         """Handle product information requests."""
         product_id = parameters.get("product_id")
         if not product_id:
             return DataPayload(message="Пожалуйста, укажите товар.")
 
+        self._logger(trace_id=trace_id, request=request).info(
+            "platform.product_info intent=%s product_id=%s", intent, product_id
+        )
         product = self._get_product_by_id(product_id)
         if not product:
             return DataPayload(message="Товар не найден.")
@@ -591,13 +705,18 @@ class PlatformApiClient:
     # Search Handlers
     # -------------------------------------------------------------------------
     async def find_by_inn(
-        self, parameters: Dict[str, Any], request: ChatRequest, user_profile: UserProfile | None
+        self, parameters: Dict[str, Any], request: ChatRequest, user_profile: UserProfile | None, trace_id: str | None = None
     ) -> List[DataProduct]:
         """Find products by INN (International Nonproprietary Name)."""
         inn = str(parameters.get("inn") or parameters.get("query") or "").strip()
         if not inn:
             return []
 
+        self._logger(trace_id=trace_id, request=request).info(
+            "platform.find_by_inn inn=%s region=%s",
+            inn,
+            getattr(request.ui_state, "selected_region_id", None) if request.ui_state else None,
+        )
         raw_products = self._mock.find_products_by_inn(inn)
         products = []
         for raw in raw_products:
@@ -608,17 +727,25 @@ class PlatformApiClient:
 
         price_limit = self._resolve_price_max(parameters, user_profile)
         return self._post_process_products(
-            products, request, include_rx=False, user_profile=user_profile, price_max=price_limit
+            products,
+            request,
+            include_rx=False,
+            user_profile=user_profile,
+            price_max=price_limit,
+            parameters=parameters,
         )
 
     async def find_analogs(
-        self, parameters: Dict[str, Any], request: ChatRequest, user_profile: UserProfile | None
+        self, parameters: Dict[str, Any], request: ChatRequest, user_profile: UserProfile | None, trace_id: str | None = None
     ) -> List[DataProduct]:
         """Find analog products."""
         product_id = parameters.get("product_id")
         if not product_id:
             return []
 
+        self._logger(trace_id=trace_id, request=request).info(
+            "platform.find_analogs product_id=%s", product_id
+        )
         raw_products = self._mock.find_analogs(product_id)
         products = []
         for raw in raw_products:
@@ -629,14 +756,20 @@ class PlatformApiClient:
 
         price_limit = self._resolve_price_max(parameters, user_profile)
         return self._post_process_products(
-            products, request, include_rx=False, user_profile=user_profile, price_max=price_limit
+            products,
+            request,
+            include_rx=False,
+            user_profile=user_profile,
+            price_max=price_limit,
+            parameters=parameters,
         )
 
     async def find_promo(
-        self, parameters: Dict[str, Any], request: ChatRequest, user_profile: UserProfile | None
+        self, parameters: Dict[str, Any], request: ChatRequest, user_profile: UserProfile | None, trace_id: str | None = None
     ) -> List[DataProduct]:
         """Find products with promotions."""
         limit = int(parameters.get("limit", 10))
+        self._logger(trace_id=trace_id, request=request).info("platform.find_promo limit=%s", limit)
         raw_products = self._mock.find_promo_products(limit=limit)
         products = []
         for raw in raw_products:
@@ -647,7 +780,12 @@ class PlatformApiClient:
 
         price_limit = self._resolve_price_max(parameters, user_profile)
         return self._post_process_products(
-            products, request, include_rx=False, user_profile=user_profile, price_max=price_limit
+            products,
+            request,
+            include_rx=False,
+            user_profile=user_profile,
+            price_max=price_limit,
+            parameters=parameters,
         )
 
     # -------------------------------------------------------------------------
@@ -659,11 +797,14 @@ class PlatformApiClient:
         parameters: Dict[str, Any],
         request: ChatRequest,
         user_profile: UserProfile | None,
+        trace_id: str | None = None,
     ) -> DataPayload:
         """Handle pharmacy-related requests."""
 
+        req_logger = self._logger(trace_id=trace_id, request=request)
         if intent == IntentType.SHOW_PHARMACIES_BY_METRO:
             metro = str(parameters.get("metro") or parameters.get("metro_station") or "").strip()
+            req_logger.info("platform.show_pharmacies_by_metro metro=%s", metro)
             pharmacies = self._mock.find_pharmacies_by_metro(metro) if metro else self._mock.list_pharmacies(limit=5)
             return DataPayload(pharmacies=pharmacies)
 
@@ -671,6 +812,7 @@ class PlatformApiClient:
             pharmacy_id = parameters.get("pharmacy_id")
             if not pharmacy_id:
                 return DataPayload(message="Пожалуйста, укажите аптеку.")
+            req_logger.info("platform.show_pharmacy_info pharmacy_id=%s", pharmacy_id)
             pharmacy = self._mock.get_pharmacy(pharmacy_id)
             if not pharmacy:
                 return DataPayload(message="Аптека не найдена.")
@@ -680,6 +822,7 @@ class PlatformApiClient:
             pharmacy_id = parameters.get("pharmacy_id")
             if not pharmacy_id:
                 return DataPayload(message="Пожалуйста, укажите аптеку.")
+            req_logger.info("platform.show_pharmacy_hours pharmacy_id=%s", pharmacy_id)
             hours = self._mock.get_pharmacy_working_hours(pharmacy_id)
             pharmacy = self._mock.get_pharmacy(pharmacy_id)
             return DataPayload(
@@ -693,6 +836,7 @@ class PlatformApiClient:
                 return DataPayload(message="Пожалуйста, укажите товар.")
             availability = self._mock.get_product_availability_by_pharmacies(product_id)
             product = self._get_product_by_id(product_id)
+            req_logger.info("platform.show_product_availability product_id=%s", product_id)
             return DataPayload(
                 products=[product.model_dump()] if product else [],
                 pharmacies=availability,
@@ -704,7 +848,12 @@ class PlatformApiClient:
                 return DataPayload(message="Пожалуйста, укажите товар.")
             region = None
             if user_profile and user_profile.preferences:
-                region = user_profile.preferences.region
+                region = getattr(user_profile.preferences, "region", None)
+            req_logger.info(
+                "platform.show_nearest_pharmacy_with_product product_id=%s region=%s",
+                product_id,
+                region,
+            )
             result = self._mock.find_nearest_pharmacy_with_product(product_id, region)
             if not result:
                 return DataPayload(message="К сожалению, товар не найден в ближайших аптеках.")
@@ -719,19 +868,21 @@ class PlatformApiClient:
     # Order Handlers
     # -------------------------------------------------------------------------
     async def _handle_order(
-        self, intent: IntentType, parameters: Dict[str, Any], request: ChatRequest
+        self, intent: IntentType, parameters: Dict[str, Any], request: ChatRequest, trace_id: str | None = None
     ) -> DataPayload:
         """Handle order-related requests."""
         user_id = request.user_id
         if not user_id:
             return DataPayload(message="Для работы с заказами необходима авторизация.")
 
+        req_logger = self._logger(trace_id=trace_id, request=request)
         if intent == IntentType.PLACE_ORDER:
             cart = self._mock.get_cart(user_id)
             items = cart.get("items", [])
             if not items:
                 return DataPayload(message="Корзина пуста. Добавьте товары для оформления заказа.")
             delivery_type = parameters.get("delivery_type", "pickup")
+            req_logger.info("platform.place_order delivery_type=%s items=%s", delivery_type, len(items))
             order = self._mock.create_order(user_id, items, delivery_type)
             self._mock.clear_cart(user_id)
             return DataPayload(orders=[self._serialize_order(order)])
@@ -741,6 +892,7 @@ class PlatformApiClient:
             if not order_id:
                 return DataPayload(message="Пожалуйста, укажите номер заказа.")
             reason = parameters.get("reason")
+            req_logger.info("platform.cancel_order order_id=%s reason=%s", order_id, reason)
             order = self._mock.cancel_order(order_id, reason)
             if not order:
                 return DataPayload(message="Не удалось отменить заказ. Возможно, он уже выполнен.")
@@ -750,6 +902,7 @@ class PlatformApiClient:
             order_id = parameters.get("order_id")
             if not order_id:
                 return DataPayload(message="Пожалуйста, укажите номер заказа.")
+            req_logger.info("platform.extend_order order_id=%s", order_id)
             order = self._mock.extend_order_pickup_time(order_id)
             if not order:
                 return DataPayload(message="Не удалось продлить время хранения заказа.")
@@ -766,6 +919,7 @@ class PlatformApiClient:
                     order_id = orders[0].get("order_id")
             if not order_id:
                 return DataPayload(message="Не найден предыдущий заказ для повтора.")
+            req_logger.info("platform.reorder_previous order_id=%s", order_id)
             new_order = self._mock.reorder(user_id, order_id)
             if not new_order:
                 return DataPayload(message="Не удалось повторить заказ.")
@@ -780,6 +934,7 @@ class PlatformApiClient:
                 order = orders[0] if orders else None
             if not order:
                 return DataPayload(message="Активный заказ не найден.")
+            req_logger.info("platform.show_order_delivery_time order_id=%s", order_id or order.get("order_id"))
             return DataPayload(
                 orders=[self._serialize_order(order)],
                 message=f"Ожидаемое время: {order.get('estimated_delivery', 'уточняется')}",
@@ -790,19 +945,21 @@ class PlatformApiClient:
     # -------------------------------------------------------------------------
     # Cart Extended Handlers
     # -------------------------------------------------------------------------
-    async def apply_promo_code(self, parameters: Dict[str, Any], request: ChatRequest) -> Dict[str, Any]:
+    async def apply_promo_code(self, parameters: Dict[str, Any], request: ChatRequest, trace_id: str | None = None) -> Dict[str, Any]:
         """Apply promo code to cart."""
         promo_code = str(parameters.get("promo_code") or parameters.get("code") or "").strip()
         if not promo_code:
             cart = self._mock.get_cart(request.user_id)
             return {**self._serialize_cart(cart), "promo_error": "Пожалуйста, укажите промокод."}
 
+        self._logger(trace_id=trace_id, request=request).info("platform.apply_promo_code promo=%s", promo_code)
         cart = self._mock.apply_promo_code(request.user_id, promo_code)
         return self._serialize_cart(cart)
 
-    async def select_delivery_type(self, parameters: Dict[str, Any], request: ChatRequest) -> Dict[str, Any]:
+    async def select_delivery_type(self, parameters: Dict[str, Any], request: ChatRequest, trace_id: str | None = None) -> Dict[str, Any]:
         """Select delivery type for order."""
         delivery_type = parameters.get("delivery_type", "pickup")
+        self._logger(trace_id=trace_id, request=request).info("platform.select_delivery_type type=%s", delivery_type)
         cart = self._mock.get_cart(request.user_id)
         cart["delivery_type"] = delivery_type
         cart["delivery_info"] = (
@@ -814,17 +971,19 @@ class PlatformApiClient:
     # User Handlers
     # -------------------------------------------------------------------------
     async def _handle_user(
-        self, intent: IntentType, parameters: Dict[str, Any], request: ChatRequest
+        self, intent: IntentType, parameters: Dict[str, Any], request: ChatRequest, trace_id: str | None = None
     ) -> DataPayload:
         """Handle user-related requests."""
         user_id = request.user_id
         if not user_id:
             return DataPayload(message="Для этого действия необходима авторизация.")
 
+        req_logger = self._logger(trace_id=trace_id, request=request)
         if intent == IntentType.UPDATE_PROFILE:
             preferences = parameters.get("preferences", {})
             if not preferences:
                 return DataPayload(message="Укажите, что именно нужно обновить в профиле.")
+            req_logger.info("platform.update_profile fields=%s", list(preferences.keys()))
             user = self._mock.update_user_preferences(user_id, preferences)
             if not user:
                 return DataPayload(message="Не удалось обновить профиль.")
@@ -835,6 +994,7 @@ class PlatformApiClient:
 
         if intent == IntentType.SHOW_ACTIVE_COUPONS:
             coupons = self._mock.get_user_coupons(user_id)
+            req_logger.info("platform.show_active_coupons count=%s", len(coupons))
             return DataPayload(
                 metadata={"coupons": coupons},
                 message=f"У вас {len(coupons)} активных купонов." if coupons else "Активных купонов нет.",
@@ -846,7 +1006,7 @@ class PlatformApiClient:
     # Booking Handler
     # -------------------------------------------------------------------------
     async def book_product_pickup(
-        self, parameters: Dict[str, Any], request: ChatRequest
+        self, parameters: Dict[str, Any], request: ChatRequest, trace_id: str | None = None
     ) -> DataPayload:
         """Book a product for pickup."""
         user_id = request.user_id
@@ -863,6 +1023,9 @@ class PlatformApiClient:
         if not pharmacy_id:
             return DataPayload(message="Пожалуйста, выберите аптеку для бронирования.")
 
+        self._logger(trace_id=trace_id, request=request).info(
+            "platform.book_product_pickup product_id=%s pharmacy_id=%s", product_id, pharmacy_id
+        )
         booking = self._mock.book_product_pickup(user_id, product_id, pharmacy_id)
         if not booking:
             return DataPayload(message="К сожалению, не удалось забронировать товар. Возможно, он отсутствует в наличии.")
@@ -929,6 +1092,7 @@ class PlatformApiClient:
         price_max: float | None = None,
         intent: IntentType | None = None,
         dosage_form: str | None = None,
+        parameters: Dict[str, Any] | None = None,
     ) -> List[DataProduct]:
         filtered = self._filter_products(
             products,
@@ -938,6 +1102,7 @@ class PlatformApiClient:
             user_profile=user_profile,
             price_max=price_max,
             dosage_form=dosage_form,
+            parameters=parameters,
         )
         return self._sort_products(filtered, user_profile=user_profile, intent=intent)
 
@@ -951,23 +1116,39 @@ class PlatformApiClient:
         user_profile: UserProfile | None,
         price_max: float | None,
         dosage_form: str | None = None,
+        parameters: Dict[str, Any] | None = None,
     ) -> List[DataProduct]:
         ui_state = request.ui_state
         region_id = ui_state.selected_region_id if ui_state else None
         pharmacy_id = ui_state.selected_pharmacy_id if ui_state else None
+        params = parameters or {}
         normalized_filters = self._normalize_meta_filters(meta_filters)
         preferences = user_profile.preferences if user_profile else None
-        sugar_free_pref = preferences.sugar_free is True if preferences else False
-        lactose_free_pref = preferences.lactose_free is True if preferences else False
-        for_children_pref = preferences.for_children is True if preferences else False
-        preferred_forms = self._normalize_preferred_forms(preferences)
+        sugar_free_pref = bool(
+            preferences
+            and preferences.sugar_free is True
+            and not self._is_flag_overridden("sugar_free", params, normalized_filters)
+        )
+        lactose_free_pref = bool(
+            preferences
+            and preferences.lactose_free is True
+            and not self._is_flag_overridden("lactose_free", params, normalized_filters)
+        )
+        for_children_pref = bool(
+            preferences
+            and preferences.for_children is True
+            and not self._is_flag_overridden("for_children", params, normalized_filters)
+        )
+        explicit_preferred_forms = self._normalize_forms_value(params.get("preferred_forms"))
+        preferred_forms = explicit_preferred_forms or self._normalize_preferred_forms(preferences)
         normalized_dosage_form = str(dosage_form).strip().lower() if dosage_form else None
-        effective_region = region_id or (preferences.region if preferences else None)
+        effective_region = region_id or (getattr(preferences, "region", None) if preferences else None)
         # TODO: replace client-side region filtering with real geo-aware catalog queries.
 
         filtered: List[DataProduct] = []
         general_passed: List[DataProduct] = []
         preference_filters_applied = False
+        apply_preferred_forms = bool(preferred_forms) and not normalized_dosage_form
         for product in products:
             if effective_region and product.region_id and product.region_id != effective_region:
                 continue
@@ -995,12 +1176,10 @@ class PlatformApiClient:
                         continue
                 if for_children_pref:
                     preference_filters_applied = True
-                    if not product.is_for_children:
-                        continue
-                if preferred_forms:
-                    preference_filters_applied = True
-                    if not self._preferred_form_matches(product, preferred_forms):
-                        continue
+            if apply_preferred_forms:
+                preference_filters_applied = True
+                if not self._preferred_form_matches(product, preferred_forms):
+                    continue
             filtered.append(product)
         if not filtered and preference_filters_applied:
             # Fall back to general filters if strict preference filters produced no results.
@@ -1014,14 +1193,14 @@ class PlatformApiClient:
         user_profile: UserProfile | None,
         intent: IntentType | None,
     ) -> List[DataProduct]:
-        # При has_children приоритизируем детские товары в начале списка
-        has_children = False
+        # При явном запросе товаров для детей приоритизируем детские товары
+        prefers_children = False
         if user_profile:
-            has_children = getattr(user_profile.preferences, "has_children", False)
+            prefers_children = getattr(user_profile.preferences, "for_children", False)
         
         def sort_key(product: DataProduct) -> tuple:
             # Детские товары идут первыми если у пользователя есть дети
-            children_priority = 0 if (has_children and product.is_for_children) else 1
+            children_priority = 0 if (prefers_children and product.is_for_children) else 1
             return (
                 children_priority,
                 self._preference_priority(product, user_profile, intent),
@@ -1078,7 +1257,7 @@ class PlatformApiClient:
                 score += 1
         # Если у пользователя есть дети, предпочитаем детские версии препаратов
         # для всех product-related intents
-        if getattr(prefs, "has_children", False) and intent in self._PRODUCT_INTENTS:
+        if getattr(prefs, "for_children", False) and intent in self._PRODUCT_INTENTS:
             score += -2 if product.is_for_children else 1
         tags = user_profile.tags or []
         if "promo_lover" in tags:
@@ -1089,15 +1268,27 @@ class PlatformApiClient:
         if not preferences:
             return []
         forms = (
-            getattr(preferences, "preferred_dosage_forms", None)
-            or getattr(preferences, "preferred_forms", None)
+            getattr(preferences, "preferred_forms", None)
+            or getattr(preferences, "preferred_dosage_forms", None)
             or []
         )
+        return self._normalize_forms_value(forms)
+
+    def _normalize_forms_value(self, forms: Any) -> List[str]:
+        if not forms:
+            return []
+        iterable: Sequence[Any]
+        if isinstance(forms, str):
+            iterable = [forms]
+        elif isinstance(forms, (list, tuple, set)):
+            iterable = forms
+        else:
+            return []
         normalized: List[str] = []
-        for form in forms:
-            if not form:
-                continue
-            normalized.append(str(form).strip().lower())
+        for form in iterable:
+            text = str(form).strip().lower()
+            if text:
+                normalized.append(text)
         return normalized
 
     def _preferred_form_matches(self, product: DataProduct, normalized_forms: Sequence[str]) -> bool:
@@ -1133,6 +1324,14 @@ class PlatformApiClient:
             if any(keyword in combined for keyword in keywords):
                 return form
         return None
+
+    def _is_flag_overridden(
+        self, flag: str, parameters: Dict[str, Any], normalized_filters: Sequence[str]
+    ) -> bool:
+        if flag in parameters and parameters.get(flag) is not None:
+            return True
+        target_attr = f"is_{flag}"
+        return any(self._META_FILTER_ATTRS.get(value) == target_attr for value in normalized_filters)
 
     def _matches_preferred_form(self, product: DataProduct, preferred_forms: Sequence[str]) -> bool:
         if not preferred_forms:

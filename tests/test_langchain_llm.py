@@ -22,6 +22,13 @@ class FakeLLM:
         self.bound_kwargs = kwargs
         return self
 
+    def with_structured_output(self, *args, **kwargs):
+        # In tests we don't need real structured parsing, just return self.
+        return self
+
+    async def __call__(self, prompt_input):
+        return await self.ainvoke(prompt_input)
+
     async def ainvoke(self, prompt_input):
         self.calls.append(prompt_input)
         if self.raise_error:

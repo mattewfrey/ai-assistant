@@ -2,19 +2,19 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .routers import chat
 from .services.error_handling import (
-    AppError,
     build_error_response,
+    extract_conversation_id,
     log_exception,
-    map_exception_to_error_code,
     new_trace_id,
 )
+from .services.errors import AssistantError, map_exception
 
 logger = logging.getLogger(__name__)
 
@@ -45,54 +45,19 @@ def create_app() -> FastAPI:
     async def validation_exception_handler(
         request: Request, exc: RequestValidationError
     ):
-        trace_id = new_trace_id()
-        await log_exception(request=request, exc=exc, trace_id=trace_id, handled=True)
-        error_code, reason, status_code = map_exception_to_error_code(exc)
-        return build_error_response(
-            error_code=error_code,
-            reason=reason,
-            status_code=status_code,
-            debug_payload={"trace_id": trace_id},
-        )
+        return await _handle_exception(request, exc, handled=True)
 
-    @app.exception_handler(HTTPException)
-    async def http_exception_handler(request: Request, exc: HTTPException):
-        trace_id = new_trace_id()
-        await log_exception(request=request, exc=exc, trace_id=trace_id, handled=True)
-        error_code, reason, status_code = map_exception_to_error_code(exc)
-        return build_error_response(
-            error_code=error_code,
-            reason=reason,
-            status_code=status_code,
-            debug_payload={"trace_id": trace_id},
-        )
+    @app.exception_handler(AssistantError)
+    async def assistant_error_handler(request: Request, exc: AssistantError):
+        return await _handle_exception(request, exc, handled=True)
 
-    @app.exception_handler(AppError)
-    async def app_error_handler(request: Request, exc: AppError):
-        trace_id = new_trace_id()
-        await log_exception(request=request, exc=exc, trace_id=trace_id, handled=True)
-        error_code, reason, status_code = map_exception_to_error_code(exc)
-        debug_payload = {"trace_id": trace_id}
-        if exc.debug:
-            debug_payload.update(exc.debug)
-        return build_error_response(
-            error_code=error_code,
-            reason=reason,
-            status_code=status_code,
-            debug_payload=debug_payload,
-        )
+    @app.exception_handler(ValueError)
+    async def value_error_handler(request: Request, exc: ValueError):
+        return await _handle_exception(request, exc, handled=True)
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):
-        trace_id = new_trace_id()
-        await log_exception(request=request, exc=exc, trace_id=trace_id, handled=False)
-        error_code, reason, status_code = map_exception_to_error_code(exc)
-        return build_error_response(
-            error_code=error_code,
-            reason=reason,
-            status_code=status_code,
-            debug_payload={"trace_id": trace_id},
-        )
+        return await _handle_exception(request, exc, handled=False)
 
     app.include_router(chat.router)
     if settings.langsmith_api_key and settings.langsmith_tracing_v2:
@@ -107,4 +72,30 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
+
+
+async def _handle_exception(request: Request, exc: Exception, *, handled: bool):
+    trace_id = new_trace_id()
+    error_code, http_status, reason = map_exception(exc)
+    conversation_id = await extract_conversation_id(request) or trace_id
+    debug_payload = {"trace_id": trace_id}
+    if isinstance(exc, AssistantError) and getattr(exc, "debug", None):
+        debug_payload.update(exc.debug)
+    await log_exception(
+        request=request,
+        exc=exc,
+        trace_id=trace_id,
+        handled=handled,
+        error_code=error_code,
+        reason=reason,
+        conversation_id=conversation_id,
+    )
+    return build_error_response(
+        conversation_id=conversation_id,
+        error_code=error_code,
+        reason=reason,
+        http_status=http_status,
+        debug_payload=debug_payload,
+        status_code=http_status,
+    )
 

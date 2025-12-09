@@ -3,6 +3,51 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from app.main import create_app
+
+
+@pytest.fixture(scope="module")
+def client() -> TestClient:
+    app = create_app()
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+def test_chat_endpoint_show_cart_flow(client: TestClient) -> None:
+    """Navigation request should be handled by router without LLM."""
+    response = client.post("/api/ai/chat/message", json={"message": "Покажи корзину"})
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+
+    assert (payload.get("reply", {}) or {}).get("text")
+    intents = {action.get("intent") for action in payload.get("actions") or []}
+    assert "SHOW_CART" in intents
+    assert payload.get("data", {}).get("cart") is not None
+    debug = payload.get("meta", {}).get("debug") or {}
+    assert debug.get("llm_used") is False
+
+
+def test_chat_endpoint_symptom_with_price_filter(client: TestClient) -> None:
+    """Symptom query should return filtered products from mock platform."""
+    response = client.post(
+        "/api/ai/chat/message",
+        json={"message": "Болит голова, нужны таблетки до 500р"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+
+    products = payload.get("data", {}).get("products") or []
+    assert products, "Ожидали список товаров от мок-платформы"
+    prices = [p.get("price") for p in products if p.get("price") is not None]
+    assert all(price <= 500 for price in prices)
+
+    reply_text = (payload.get("reply", {}) or {}).get("text", "").lower()
+    assert any(token in reply_text for token in ("нашл", "вариант", "понял"))
+import pytest
+from fastapi.testclient import TestClient
+
 from app.config import Settings, get_settings
 from app.main import create_app
 
@@ -33,6 +78,7 @@ def test_chat_cart_router_path(client: TestClient):
     body = resp.json()
     assert body["meta"]["debug"]["router_matched"] is True
     assert body["meta"]["debug"]["llm_used"] is False
+    assert body["meta"]["debug"]["source"] == "local_router"
 
 
 def test_chat_slot_followup_flow(client: TestClient):

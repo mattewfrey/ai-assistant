@@ -24,6 +24,7 @@ def build_intent_prompt(schema_hint: str) -> ChatPromptTemplate:
         "## Консультация\n"
         "Сообщение пользователя: {message}\n"
         "Профиль пользователя (может быть пустым JSON): {profile_json}\n"
+        "Краткое резюме предпочтений: {preference_summary}\n"
         "Состояние диалога: {dialog_state_json}\n"
         "Интерфейс (UI state): {ui_state_json}\n"
         "Доступные интенты: {available_intents}\n"

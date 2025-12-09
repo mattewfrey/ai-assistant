@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import functools
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -12,6 +13,8 @@ import yaml
 from ..intents import ActionChannel, IntentType
 from ..models import ChatRequest, UserProfile
 from .dialog_state import DialogState
+
+logger = logging.getLogger(__name__)
 
 CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "router_config.yaml"
 DEFAULT_PROMPT = "Уточните, пожалуйста."
@@ -147,7 +150,11 @@ class RouterService:
         dialog_state: DialogState | None,
     ) -> RouterResult:
         slots = self._prefill_slots(rule.intent, message, normalized_message, user_profile, dialog_state)
-        missing_slots = self._missing_slots(rule, slots)
+        required_slots = list(rule.slots_required)
+        if rule.intent == IntentType.FIND_BY_SYMPTOM and slots.get("dosage_form"):
+            # Если форма выпуска уже указана, не требуем возраст для простого ответа
+            required_slots = [slot for slot in required_slots if slot != "age"]
+        missing_slots = self._missing_slots(rule, slots, required_slots)
         return RouterResult(
             matched=True,
             intent=rule.intent,
@@ -213,9 +220,9 @@ class RouterService:
             prefs = user_profile.preferences
             slots.setdefault("age", getattr(prefs, "age", None))
             slots.setdefault("price_max", getattr(prefs, "default_max_price", None))
-            preferred_forms = getattr(prefs, "preferred_dosage_forms", None)
+            preferred_forms = getattr(prefs, "preferred_forms", None)
             if preferred_forms:
-                slots.setdefault("preferred_dosage_forms", preferred_forms)
+                slots.setdefault("preferred_forms", preferred_forms)
                 slots.setdefault("dosage_form", preferred_forms[0])
 
         if dialog_state and dialog_state.slots:
@@ -223,9 +230,10 @@ class RouterService:
 
         return {k: v for k, v in slots.items() if v is not None}
 
-    def _missing_slots(self, rule: RouterRule, slots: Dict[str, Any]) -> List[SlotDefinition]:
+    def _missing_slots(self, rule: RouterRule, slots: Dict[str, Any], required_slots: List[str] | None = None) -> List[SlotDefinition]:
         missing: List[SlotDefinition] = []
-        for slot_name in rule.slots_required:
+        required = required_slots if required_slots is not None else rule.slots_required
+        for slot_name in required:
             if slot_name not in slots or slots[slot_name] in (None, "", []):
                 prompt = self._questions_map(rule).get(slot_name, DEFAULT_PROMPT)
                 missing.append(SlotDefinition(name=slot_name, prompt=prompt))
@@ -257,7 +265,9 @@ class RouterService:
     def _extract_symptom_phrase(self, message: str, normalized_message: str) -> Optional[str]:
         match = self._symptom_regex.search(message)
         if match:
-            return match.group("symptom").strip()
+            raw = match.group("symptom")
+            cleaned = self._clean_symptom(raw)
+            return cleaned or raw.strip()
         for keyword in self._symptom_keywords:
             if keyword in normalized_message:
                 return keyword
@@ -326,6 +336,17 @@ class RouterService:
             symptom_keywords=symptom_keywords,
             dosage_forms=dosage_forms,
         )
+
+    @staticmethod
+    def _clean_symptom(raw: str) -> str:
+        text = raw.strip()
+        stop_words = [" до ", " за ", " по ", " выше ", " ниже ", " по цене "]
+        for stop in stop_words:
+            idx = text.find(stop)
+            if idx != -1:
+                text = text[:idx]
+                break
+        return text.strip(" ,.")
 
 
 _router_service: RouterService | None = None

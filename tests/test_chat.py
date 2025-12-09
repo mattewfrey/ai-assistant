@@ -24,6 +24,7 @@ from app.services.user_profile_store import UserProfileStore
 class FakeAssistantClient(AssistantClient):
     def __init__(self) -> None:  # pragma: no cover - parent requires settings
         self.calls = 0
+        self._langchain_client = None
 
     async def analyze_message(self, request, intents):  # type: ignore[override]
         self.calls += 1
@@ -47,7 +48,7 @@ class FakeAssistantClient(AssistantClient):
 
 class FakePlatformClient(PlatformApiClient):
     def __init__(self) -> None:  # pragma: no cover
-        pass
+        self._mock = None  # align with base client attribute usage
 
     async def fetch_products(  # type: ignore[override]
         self,
@@ -56,11 +57,16 @@ class FakePlatformClient(PlatformApiClient):
         request,
         *,
         user_profile=None,
+        trace_id=None,
+        **kwargs,
     ):
         return [{"id": "p1"}]
 
-    async def dispatch(self, action, request, *, user_profile=None):  # type: ignore[override]
+    async def dispatch(self, action, request, *, user_profile=None, trace_id=None, **kwargs):  # type: ignore[override]
         return DataPayload(products=[{"id": "p1"}])
+
+    async def show_cart(self, parameters, request, trace_id=None, **kwargs):  # type: ignore[override]
+        return {"cart": {"items": []}}
 
 
 def create_test_app(router_service=None, slot_manager=None) -> TestClient:

@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     langsmith_tracing_v2: bool = Field(default=False, alias="LANGCHAIN_TRACING_V2")
     enable_beautify_reply: bool = Field(default=True, alias="ENABLE_BEAUTIFY_REPLY")
     enable_request_tracing: bool = Field(default=True, alias="ENABLE_REQUEST_TRACING")
+    enable_local_router: bool = Field(default=True, alias="ENABLE_LOCAL_ROUTER")
 
     # Rate limiting settings
     llm_rate_limit_window_seconds: int = Field(default=60, alias="LLM_RATE_LIMIT_WINDOW")

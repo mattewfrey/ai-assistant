@@ -4,7 +4,14 @@ import asyncio
 
 from app.config import Settings
 from app.intents import ActionType, IntentType
-from app.models import AssistantAction, AssistantResponse, ChatRequest, DataPayload, Reply
+from app.models import (
+    AssistantAction,
+    AssistantMeta,
+    AssistantResponse,
+    ChatRequest,
+    DataPayload,
+    Reply,
+)
 from app.services.assistant_client import AssistantClient
 from app.services.conversation_store import ConversationStore
 from app.services.user_profile_store import UserProfileStore
@@ -81,6 +88,39 @@ def test_analyze_message_prefers_langchain():
     assert stub.calls and stub.calls[0]["message"] == "Привет"
 
 
+def test_preference_summary_passed_to_langchain():
+    stub_response = AssistantResponse(
+        reply=Reply(text="with_profile"),
+        actions=[AssistantAction(type=ActionType.NOOP, parameters={})],
+    )
+    stub = StubLangchainClient(response=stub_response)
+    user_store = UserProfileStore()
+    user_store.update_preferences(
+        "user-1",
+        age=35,
+        default_max_price=500,
+        preferred_forms=["таблетки"],
+        sugar_free=True,
+    )
+    settings = Settings(openai_api_key="key", openai_model="gpt-test", use_langchain=True)
+    assistant = AssistantClient(
+        settings=settings,
+        conversation_store=ConversationStore(),
+        user_profile_store=user_store,
+        langchain_client=stub,
+    )
+
+    request = ChatRequest(conversation_id="conv-pref", message="нужен совет", user_id="user-1")
+
+    response = asyncio.run(assistant.analyze_message(request, intents=[IntentType.SHOW_CART.value]))
+
+    assert response.reply.text == "with_profile"
+    assert stub.calls, "Langchain client should receive call"
+    summary = stub.calls[0].get("preference_summary") or ""
+    assert "35" in summary and "таблетки" in summary and "500" in summary
+    assert "без сахара" in summary
+
+
 def test_analyze_message_falls_back_when_langchain_fails():
     stub = StubLangchainClient(response=None, error=RuntimeError("boom"))
 
@@ -96,4 +136,61 @@ def test_analyze_message_falls_back_when_langchain_fails():
     response = asyncio.run(assistant.analyze_message(request, intents=[IntentType.SHOW_CART.value]))
 
     assert "Ассистент" in response.reply.text
+
+
+def test_langchain_json_response_passes_through_with_debug_flags():
+    stub_response = AssistantResponse(
+        reply=Reply(text="structured"),
+        actions=[
+            AssistantAction(
+                type=ActionType.CALL_PLATFORM_API,
+                intent=IntentType.SHOW_CART,
+                parameters={},
+            )
+        ],
+        meta=AssistantMeta(),
+    )
+    stub = StubLangchainClient(response=stub_response)
+    settings = Settings(openai_api_key="key", openai_model="gpt-test", use_langchain=True)
+    assistant = AssistantClient(
+        settings=settings,
+        conversation_store=ConversationStore(),
+        user_profile_store=UserProfileStore(),
+        langchain_client=stub,
+    )
+
+    result = asyncio.run(
+        assistant.analyze_message(
+            ChatRequest(conversation_id="conv-lang", message="покажи корзину"),
+            intents=[IntentType.SHOW_CART.value],
+        )
+    )
+
+    assert result.reply.text == "structured"
+    assert result.actions and result.actions[0].intent == IntentType.SHOW_CART
+    debug = result.meta.debug if result.meta else {}
+    assert debug.get("llm_used") is True
+
+
+def test_fallback_used_when_langchain_unavailable():
+    stub = StubLangchainClient(response=None, error=RuntimeError("outage"))
+    settings = Settings(openai_api_key="key", openai_model="gpt-test", use_langchain=True)
+    assistant = AssistantClient(
+        settings=settings,
+        conversation_store=ConversationStore(),
+        user_profile_store=UserProfileStore(),
+        langchain_client=stub,
+    )
+
+    result = asyncio.run(
+        assistant.analyze_message(
+            ChatRequest(conversation_id="conv-fallback", message="нужны таблетки"),
+            intents=[IntentType.FIND_BY_SYMPTOM.value],
+        )
+    )
+
+    assert result.reply.text
+    assert result.actions == []
+    debug = result.meta.debug if result.meta else {}
+    assert debug.get("llm_used") is False
 

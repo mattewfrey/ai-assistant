@@ -28,8 +28,6 @@ def test_router_product_by_name():
     assert result.matched is True
     assert result.intent == IntentType.FIND_PRODUCT_BY_NAME
     assert result.slots.get("name") == "Нурофен 200 мг"
-from __future__ import annotations
-
 from app.models import ChatRequest
 from app.models import UserProfile
 from app.services.router import RouterService

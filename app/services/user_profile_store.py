@@ -34,7 +34,7 @@ class UserProfileStore:
 
         FIELD_ALIASES = {
             "price_ceiling": "default_max_price",
-            "preferred_forms": "preferred_dosage_forms",
+            "preferred_dosage_forms": "preferred_forms",
         }
         with self._lock:
             profile = self._profiles.setdefault(user_id, UserProfile(user_id=user_id))
@@ -47,7 +47,7 @@ class UserProfileStore:
                 if normalized_key not in preferences.model_fields:
                     continue
                 key = normalized_key
-                if key in {"preferred_dosage_forms", "preferred_brands"}:
+                if key in {"preferred_forms"}:
                     if not value:
                         continue
                     raw_iterable = value
@@ -62,6 +62,16 @@ class UserProfileStore:
                         pref_data[key] = merged
                         updated = True
                     continue
+                if key == "default_max_price":
+                    try:
+                        value = float(value)
+                    except (TypeError, ValueError):
+                        continue
+                if key == "age":
+                    try:
+                        value = int(value)
+                    except (TypeError, ValueError):
+                        continue
                 if value is None:
                     continue
                 if pref_data.get(key) != value:

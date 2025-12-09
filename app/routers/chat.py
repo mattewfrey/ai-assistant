@@ -2,25 +2,27 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, status
 
 from ..config import Settings, get_settings
-from ..intents import IntentType
-from ..models import ChatRequest, ChatResponse
+from ..intents import ActionChannel, ActionType, IntentType, get_intent_category
+from ..models import AssistantAction, AssistantMeta, AssistantResponse, ChatRequest, ChatResponse, Reply
 from ..services.assistant_client import AssistantClient
 from ..services.conversation_store import get_conversation_store
 from ..services.dialog_state_store import get_dialog_state_store
 from ..services.debug_meta import DebugMetaBuilder
-from ..services.error_handling import BadRequestError, ValidationError
-from ..services.logging_utils import log_info
+from ..services.errors import BadRequestError
 from ..services.metrics import get_metrics_service
+from ..services.local_router import LocalRouterResult, route as local_route
 from ..services.orchestrator import Orchestrator
 from ..services.platform_client import PlatformApiClient
 from ..services.router import RouterService, get_router_service
 from ..services.slot_manager import SlotManager, get_slot_manager
 from ..services.user_profile_store import UserProfileStore, get_user_profile_store
+from ..utils.logging import get_request_logger
 
 router = APIRouter(prefix="/api/ai/chat", tags=["chat"])
 logger = logging.getLogger(__name__)
@@ -70,26 +72,26 @@ async def post_message(
     metrics = get_metrics_service()
     
     if not request.message.strip():
-        raise ValidationError(
+        raise BadRequestError(
             "message must not be empty",
             reason="empty_message",
             http_status=status.HTTP_400_BAD_REQUEST,
         )
 
     conversation_id = request.conversation_id or str(uuid4())
-    trace_id = uuid4().hex if settings.enable_request_tracing else None
+    incoming_trace_id = getattr(request, "trace_id", None)
+    trace_id = incoming_trace_id or (uuid4().hex if settings.enable_request_tracing else None)
     debug_builder = DebugMetaBuilder(request_id=conversation_id)
     debug_builder.set_trace_id(trace_id)
-    normalized_request = request.model_copy(update={"conversation_id": conversation_id})
-
-    log_info(
+    normalized_request = request.model_copy(update={"conversation_id": conversation_id, "trace_id": trace_id})
+    request_logger = get_request_logger(
         logger,
-        'Incoming chat message',
         trace_id=trace_id,
         user_id=normalized_request.user_id,
         conversation_id=conversation_id,
-        intent=None,
     )
+
+    request_logger.info("Incoming chat message text=%s", normalized_request.message)
 
     user_profile = user_profile_store.get_or_create(normalized_request.user_id) if normalized_request.user_id else None
     dialog_state_store = get_dialog_state_store()
@@ -118,6 +120,25 @@ async def post_message(
         _record_history(conversation_id, normalized_request.message, chat_response.reply.text)
         _record_latency(start_time)
         return chat_response
+
+    if settings.enable_local_router:
+        local_result = local_route(normalized_request)
+        if local_result.matched:
+            metrics.record_router_match(True)
+            assistant_response = _build_local_assistant_response(local_result)
+            debug_builder.set_router_matched(True).set_llm_used(False).set_source("local_router").add_intent(
+                getattr(local_result.intent, "value", None)
+            )
+            chat_response = await orchestrator.build_response(
+                request=normalized_request,
+                assistant_response=assistant_response,
+                router_matched=True,
+                debug_builder=debug_builder,
+                trace_id=trace_id,
+            )
+            _record_history(conversation_id, normalized_request.message, chat_response.reply.text)
+            _record_latency(start_time)
+            return chat_response
 
     router_result = router_service.match(
         request=normalized_request,
@@ -149,11 +170,7 @@ async def post_message(
         window_seconds=settings.llm_rate_limit_window_seconds,
         max_calls=settings.llm_rate_limit_max_calls,
     ):
-        logger.warning(
-            "Rate limit exceeded for user_id=%s conversation_id=%s",
-            normalized_request.user_id,
-            conversation_id,
-        )
+        request_logger.warning("Rate limit exceeded")
         raise BadRequestError(
             "Превышен лимит запросов. Пожалуйста, подождите немного.",
             reason="rate_limit_exceeded",
@@ -173,7 +190,7 @@ async def post_message(
         }
         for action in assistant_response.actions
     ]
-    logger.info("Assistant actions for %s: %s", conversation_id, action_log_payload)
+    request_logger.info("Assistant actions selected=%s", action_log_payload)
 
     chat_response = await orchestrator.build_response(
         request=normalized_request,
@@ -183,6 +200,57 @@ async def post_message(
     )
     _record_latency(start_time)
     return chat_response
+
+
+def _build_local_assistant_response(result: LocalRouterResult) -> AssistantResponse:
+    intent = result.intent
+    parameters = result.parameters or {}
+    channel = _resolve_channel_from_intent(intent)
+    reply_text = _reply_text_for_intent(intent, parameters)
+    meta = AssistantMeta(
+        top_intent=getattr(intent, "value", None),
+        confidence=0.99,
+        debug={"source": "local_router", "llm_used": False, "router_matched": True},
+    )
+    action = AssistantAction(
+        type=ActionType.CALL_PLATFORM_API,
+        intent=intent,
+        channel=channel,
+        parameters=parameters,
+    )
+    return AssistantResponse(
+        reply=Reply(text=reply_text),
+        actions=[action],
+        meta=meta,
+    )
+
+
+def _resolve_channel_from_intent(intent: IntentType | None) -> ActionChannel | None:
+    category = get_intent_category(intent)
+    if category == "navigation":
+        return ActionChannel.NAVIGATION
+    if category == "order":
+        return ActionChannel.ORDER
+    if category == "symptom":
+        return ActionChannel.DATA
+    if intent == IntentType.FIND_PRODUCT_BY_NAME:
+        return ActionChannel.DATA
+    return ActionChannel.OTHER
+
+
+def _reply_text_for_intent(intent: IntentType | None, parameters: dict[str, Any]) -> str:
+    if intent == IntentType.SHOW_CART:
+        return "Показываю вашу корзину."
+    if intent in (IntentType.SHOW_ORDER_HISTORY, IntentType.SHOW_ACTIVE_ORDERS):
+        return "Открываю ваши заказы."
+    if intent == IntentType.SHOW_FAVORITES:
+        return "Показываю избранные товары."
+    if intent == IntentType.SHOW_PROFILE:
+        return "Открываю профиль."
+    if intent == IntentType.FIND_PRODUCT_BY_NAME:
+        name = parameters.get("product_name") or parameters.get("name") or "товар"
+        return f'Ищу "{name}".'
+    return "Понял, выполняю."
 
 
 def _record_history(conversation_id: str, user_message: str, assistant_text: str | None) -> None:

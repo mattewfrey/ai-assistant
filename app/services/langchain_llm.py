@@ -7,15 +7,54 @@ from dataclasses import dataclass
 from typing import Any, Dict
 
 from langsmith import Client as LangSmithClient, traceable
-from langsmith.callbacks import LangChainCallbackHandler
 from langchain_core.caches import InMemoryCache
 from langchain_core.chat_history import BaseChatMessageHistory
+from langchain_core.exceptions import OutputParserException  # modern location
 from langchain_core.globals import set_llm_cache
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
-from langchain_core.output_parsers import OutputParserException
-from langchain_core.runnables import RunnableRetry
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_openai import ChatOpenAI
+
+# RunnableRetry location changed across langchain-core versions.
+try:  # pragma: no cover - compatibility shim
+    from langchain_core.runnables import RunnableRetry
+except Exception:  # noqa: BLE001
+    class RunnableRetry:  # type: ignore[override]
+        """Minimal async retry wrapper for older langchain-core versions."""
+
+        def __init__(self, runnable, max_attempts: int = 2, retry_if_exception_type=()):
+            self._runnable = runnable
+            self._max_attempts = max_attempts
+            self._retry_if_exception_type = retry_if_exception_type or ()
+
+        async def ainvoke(self, *args, **kwargs):
+            attempt = 0
+            last_exc: Exception | None = None
+            while attempt < self._max_attempts:
+                try:
+                    return await self._runnable.ainvoke(*args, **kwargs)
+                except Exception as exc:  # noqa: BLE001
+                    last_exc = exc
+                    attempt += 1
+                    if not isinstance(exc, self._retry_if_exception_type):
+                        raise
+                    if attempt >= self._max_attempts:
+                        raise
+
+
+# Older langchain-core packaged OutputParserException under output_parsers.
+try:  # pragma: no cover - compatibility shim
+    from langchain_core.output_parsers import OutputParserException as LegacyOutputParserException
+except Exception:  # noqa: BLE001
+    LegacyOutputParserException = OutputParserException  # type: ignore[misc]
+else:
+    OutputParserException = LegacyOutputParserException
+
+# LangSmith callbacks are optional; some package versions do not ship them.
+try:  # pragma: no cover - import guard for optional dependency
+    from langsmith.callbacks import LangChainCallbackHandler
+except Exception:  # noqa: BLE001
+    LangChainCallbackHandler = None  # type: ignore[assignment]
 
 from ..config import Settings
 from ..models.assistant import AssistantResponse, Reply
@@ -98,16 +137,19 @@ class LangchainLLMClient:
             max_attempts=2,
             retry_if_exception_type=(OutputParserException, ValueError),
         )
-        # Runnable with history for intent parsing
-        self._intent_with_history = RunnableWithMessageHistory(
-            base_intent_chain,
-            self._history_factory,
-            input_messages_key="context_messages",
-            history_messages_key="context_messages",
-        )
+        # Runnable with history for intent parsing (fallback to plain chain if listeners unsupported)
+        if hasattr(base_intent_chain, "with_listeners"):
+            self._intent_with_history = RunnableWithMessageHistory(
+                base_intent_chain,
+                self._history_factory,
+                input_messages_key="context_messages",
+                history_messages_key="context_messages",
+            )
+        else:
+            self._intent_with_history = base_intent_chain
 
     @staticmethod
-    def _setup_langsmith(self, settings: Settings) -> LangSmithClient | None:
+    def _setup_langsmith(settings: Settings) -> LangSmithClient | None:
         """Initialize LangSmith tracing when enabled via settings/env."""
 
         tracing_enabled = bool(settings.langsmith_tracing_v2 or settings.langchain_tracing)
@@ -156,6 +198,9 @@ class LangchainLLMClient:
         """Return LangSmith callbacks when tracing is configured."""
         if not self._langsmith_client:
             return []
+        if LangChainCallbackHandler is None:
+            logger.warning("LangSmith callback handler unavailable; tracing callbacks disabled")
+            return []
         try:
             return [LangChainCallbackHandler(client=self._langsmith_client)]
         except Exception as exc:  # pragma: no cover - optional tracing
@@ -168,10 +213,11 @@ class LangchainLLMClient:
         *,
         message: str,
         profile: Dict[str, Any] | None,
+        preference_summary: str | None = None,
         dialog_state: DialogState | None,
         ui_state: Dict[str, Any] | None,
         available_intents: list[str],
-        conversation_id: str | None,
+        conversation_id: str | None = None,
         user_id: str | None = None,
         trace_id: str | None = None,
     ) -> LLMRunResult:
@@ -193,6 +239,7 @@ class LangchainLLMClient:
         payload = {
             "message": message,
             "profile_json": profile_signature,
+            "preference_summary": preference_summary or "",
             "dialog_state_json": json.dumps(self._dialog_state_to_dict(dialog_state), ensure_ascii=False),
             "ui_state_json": json.dumps(ui_state or {}, ensure_ascii=False),
             "available_intents": ", ".join(sorted(available_intents)),

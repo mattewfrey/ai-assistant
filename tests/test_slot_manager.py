@@ -37,8 +37,6 @@ def test_slot_manager_followup_fills_age_and_returns_action():
     assert action.parameters.get("age") == 30
     assert response.meta and response.meta.debug
     assert response.meta.debug.get("slot_filling_used") is True
-from __future__ import annotations
-
 from app.intents import IntentType
 from app.models import UserPreferences, UserProfile
 from app.models.assistant import AssistantResponse
