@@ -1,7 +1,10 @@
 """
 RouterService - Детерминированный NLU-движок для классификации интентов.
 
-Архитектура:
+================================================================================
+АРХИТЕКТУРА
+================================================================================
+
 1. Предобработка текста (нормализация, морфология)
 2. Многоуровневый матчинг:
    - Быстрый keyword-матчинг по триггерам
@@ -11,7 +14,34 @@ RouterService - Детерминированный NLU-движок для кл�
 4. Расчет confidence и приоритизация
 5. Расширенное логирование для debug
 
-Приоритеты обработки (от высшего к низшему):
+================================================================================
+АНСАМБЛЬ С LLM
+================================================================================
+
+Router работает как первая линия классификации. Логика ансамбля:
+
+1. **router_only** (confidence >= 0.85):
+   - Router уверен в результате
+   - LLM НЕ вызывается
+   - Используем интент и слоты от Router'а
+   
+2. **router+slots** (confidence >= 0.85, но нужны слоты):
+   - Router уверен в интенте
+   - LLM может вызываться для дополнительного извлечения слотов
+   
+3. **router+llm** (0.5 <= confidence < 0.85):
+   - Router не уверен, но есть кандидаты
+   - LLM получает список кандидатов и выбирает
+   - get_candidates() возвращает топ-3 интента
+   
+4. **llm_only** (confidence < 0.5 или нет матча):
+   - Router не нашёл подходящего интента
+   - LLM полностью определяет intent + slots
+
+================================================================================
+ПРИОРИТЕТЫ ИНТЕНТОВ
+================================================================================
+
 1. Корзина/Заказы (пользователь хочет действовать)
 2. Профиль/Бонусы
 3. Аптеки/Локации  
@@ -60,10 +90,17 @@ logger = logging.getLogger(__name__)
 CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "router_config.yaml"
 DEFAULT_PROMPT = "Уточните, пожалуйста."
 
-# Минимальный confidence для уверенного матча
-MIN_CONFIDENT_MATCH = 0.8
+# Минимальный confidence для уверенного матча (router_only)
+MIN_CONFIDENT_MATCH = 0.85
+
+# Порог для ансамбля router+llm (ниже этого - llm_only)
+MIN_ENSEMBLE_THRESHOLD = 0.5
+
 # Порог для срабатывания product-детектора
 PRODUCT_DETECTOR_THRESHOLD = 0.65
+
+# Максимальное количество кандидатов для LLM дизамбигуации
+MAX_LLM_CANDIDATES = 3
 
 
 @dataclass
@@ -127,6 +164,67 @@ class RouterResult:
         """Синоним для slots (обратная совместимость)."""
         return self.slots
     
+    @property
+    def is_confident(self) -> bool:
+        """True если Router достаточно уверен (не нужен LLM)."""
+        return self.matched and self.confidence >= MIN_CONFIDENT_MATCH
+    
+    @property
+    def needs_llm_disambiguation(self) -> bool:
+        """True если нужна помощь LLM для выбора между кандидатами."""
+        return (
+            self.matched 
+            and MIN_ENSEMBLE_THRESHOLD <= self.confidence < MIN_CONFIDENT_MATCH
+            and len(self.alternative_intents) > 0
+        )
+    
+    @property
+    def needs_full_llm(self) -> bool:
+        """True если нужна полная классификация LLM."""
+        return not self.matched or self.confidence < MIN_ENSEMBLE_THRESHOLD
+    
+    def get_pipeline_path(self) -> str:
+        """
+        Определяет путь пайплайна на основе confidence.
+        
+        Returns:
+            - "router_only" - Router уверен
+            - "router+slots" - Router уверен, но нужны слоты
+            - "router+llm" - Router не уверен, нужна дизамбигуация
+            - "llm_only" - Router не нашёл, полная классификация LLM
+        """
+        if not self.matched:
+            return "llm_only"
+        
+        if self.confidence >= MIN_CONFIDENT_MATCH:
+            if self.missing_slots:
+                return "router+slots"
+            return "router_only"
+        
+        if self.confidence >= MIN_ENSEMBLE_THRESHOLD:
+            return "router+llm"
+        
+        return "llm_only"
+    
+    def get_candidates_for_llm(self) -> List[Tuple[str, float]]:
+        """
+        Возвращает кандидатов для LLM дизамбигуации.
+        
+        Returns:
+            Список пар (intent_name, confidence) для топ кандидатов
+        """
+        candidates: List[Tuple[str, float]] = []
+        
+        # Добавляем основной интент
+        if self.intent:
+            candidates.append((self.intent.value, self.confidence))
+        
+        # Добавляем альтернативы
+        for alt_intent, alt_conf in self.alternative_intents[:MAX_LLM_CANDIDATES - 1]:
+            candidates.append((alt_intent.value, alt_conf))
+        
+        return candidates[:MAX_LLM_CANDIDATES]
+    
     def to_debug_dict(self) -> Dict[str, Any]:
         """Формирует словарь для debug-вывода."""
         debug = {
@@ -136,11 +234,14 @@ class RouterResult:
             "channel": self.channel.value if self.channel else None,
             "extracted_slots": self.slots,
             "missing_slots": [s.name for s in self.missing_slots],
+            "pipeline_path": self.get_pipeline_path(),
+            "is_confident": self.is_confident,
+            "needs_llm": not self.is_confident,
         }
         if self.match_info:
             debug["match_info"] = {
                 "match_type": self.match_info.match_type,
-                "matched_triggers": self.match_info.matched_triggers[:5],  # Ограничиваем
+                "matched_triggers": self.match_info.matched_triggers[:5],
                 "matched_patterns": self.match_info.matched_patterns,
                 "negative_hits": self.match_info.negative_hits,
                 "raw_score": self.match_info.raw_score,
@@ -150,6 +251,7 @@ class RouterResult:
                 {"intent": intent.value, "score": score}
                 for intent, score in self.alternative_intents[:3]
             ]
+            debug["llm_candidates"] = self.get_candidates_for_llm()
         return debug
 
 

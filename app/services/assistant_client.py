@@ -1,17 +1,54 @@
+"""
+AssistantClient - Высокоуровневый клиент для работы с LLM.
+
+================================================================================
+РОЛЬ В АРХИТЕКТУРЕ
+================================================================================
+
+AssistantClient служит связующим звеном между Router'ом и LangChain LLM:
+
+1. Получает запрос от основного пайплайна
+2. Определяет нужно ли вызывать LLM (на основе confidence Router'а)
+3. Вызывает LangchainLLMClient с правильными параметрами
+4. Обновляет профиль пользователя на основе извлечённых предпочтений
+5. Управляет историей разговора
+
+================================================================================
+ИНТЕГРАЦИЯ С АНСАМБЛЕМ ROUTER + LLM
+================================================================================
+
+Поддерживает три режима работы:
+
+1. router_only / router+slots:
+   - Router уверен, LLM не вызывается для классификации
+   - LLM может вызываться только для beautify_reply
+
+2. router+llm:
+   - Router не уверен, есть кандидаты
+   - LLM дизамбигуирует между кандидатами
+   - Вызывается classify_intent с router_candidates
+
+3. llm_only:
+   - Router ничего не нашёл
+   - LLM полностью определяет intent + slots
+"""
+
 from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from ..config import Settings
+from ..intents import IntentType
 from ..models import ChatRequest, DataPayload, UserProfile
 from ..models.assistant import AssistantMeta, AssistantResponse, Reply
+from ..models.llm_intent import ExtractedSlots, LLMIntentResult
 from .conversation_store import ConversationStore, get_conversation_store
 from .dialog_state_store import DialogStateStore, get_dialog_state_store
 from .debug_meta import DebugMetaBuilder
 from .errors import LLMError
-from .langchain_llm import LangchainLLMClient
+from .langchain_llm import LangchainLLMClient, LLMRunResult
 from .metrics import get_metrics_service
 from .user_profile_store import UserProfileStore, get_user_profile_store
 from ..utils.logging import get_request_logger
@@ -87,11 +124,29 @@ class AssistantClient:
         request: ChatRequest,
         intents: List[str],
         *,
+        router_candidates: List[Tuple[str, float]] | None = None,
+        router_slots: Dict[str, Any] | None = None,
         debug_builder: DebugMetaBuilder | None = None,
         trace_id: str | None = None,
     ) -> AssistantResponse:
-        """Send the user message to ChatGPT and parse the structured reply."""
-
+        """
+        Анализирует сообщение с помощью LLM.
+        
+        Поддерживает режим ансамбля Router + LLM:
+        - Если router_candidates предоставлены, LLM выбирает из них
+        - Иначе LLM самостоятельно определяет интент
+        
+        Args:
+            request: Запрос пользователя
+            intents: Список доступных интентов
+            router_candidates: Кандидаты от Router'а [(intent, confidence), ...]
+            router_slots: Слоты, извлечённые Router'ом
+            debug_builder: Билдер для debug метаданных
+            trace_id: ID трассировки
+            
+        Returns:
+            AssistantResponse с классифицированным интентом
+        """
         conversation_id = request.conversation_id or ""
         request_logger = get_request_logger(
             logger,
@@ -99,10 +154,11 @@ class AssistantClient:
             user_id=request.user_id,
             conversation_id=conversation_id,
         )
-        request_logger.info("User message received: %s", request.message)
+        request_logger.info("User message received: %s", request.message[:100])
+        
         if not self._settings.openai_api_key:
             logger.warning(
-                "OPENAI_API_KEY is not set; returning fallback assistant response for conversation_id=%s",
+                "OPENAI_API_KEY is not set; returning fallback for conversation_id=%s",
                 conversation_id,
             )
             fallback = self._build_fallback_response(request, reason="missing_api_key")
@@ -110,6 +166,7 @@ class AssistantClient:
             await self._maybe_refresh_summary(conversation_id)
             if debug_builder:
                 debug_builder.set_llm_used(False).set_llm_cached(False)
+                debug_builder.set_pipeline_path("fallback")
             request_logger.warning("LLM unavailable (no API key), using fallback backend")
             return fallback
 
@@ -123,46 +180,81 @@ class AssistantClient:
 
         if self._langchain_client:
             try:
-                llm_result = await self._langchain_client.parse_intent(
+                # Определяем pipeline path
+                pipeline_path = "llm_only"
+                if router_candidates:
+                    pipeline_path = "router+llm"
+                
+                llm_result = await self._langchain_client.classify_intent(
                     message=request.message,
                     profile=user_profile.model_dump() if user_profile else None,
                     preference_summary=preference_summary,
                     dialog_state=dialog_state,
                     ui_state=request.ui_state.model_dump() if request.ui_state else None,
                     available_intents=intents,
+                    router_candidates=router_candidates,
+                    router_slots=router_slots,
                     conversation_id=conversation_id,
                     user_id=request.user_id,
                     trace_id=trace_id,
                 )
+                
                 assistant_response = llm_result.response
                 self._metrics.record_llm_call(
                     user_id=request.user_id,
                     cached=llm_result.cached,
                     token_usage=llm_result.token_usage,
                 )
+                
                 if debug_builder:
                     debug_builder.set_llm_used(True, cached=llm_result.cached)
+                    debug_builder.set_pipeline_path(llm_result.pipeline_path)
+                    
+                    if llm_result.llm_confidence is not None:
+                        debug_builder.set_llm_confidence(llm_result.llm_confidence)
+                    
+                    if llm_result.llm_intent_result:
+                        if llm_result.llm_intent_result.reasoning:
+                            debug_builder.set_llm_reasoning(llm_result.llm_intent_result.reasoning)
+                    
+                    if llm_result.extracted_entities_before:
+                        debug_builder.set_extracted_entities_before(llm_result.extracted_entities_before)
+                    if llm_result.extracted_entities_after:
+                        debug_builder.set_extracted_entities_after(llm_result.extracted_entities_after)
+                    
+                    if router_candidates:
+                        debug_builder.set_router_candidates([
+                            {"intent": i, "confidence": c} for i, c in router_candidates
+                        ])
                 else:
                     self._attach_llm_debug(
                         assistant_response,
                         used=not llm_result.cached,
                         backend="langchain",
                         cached=llm_result.cached,
+                        pipeline_path=llm_result.pipeline_path,
+                        llm_confidence=llm_result.llm_confidence,
                     )
+                
                 self._record_exchange(conversation_id, request.message, assistant_response.reply.text)
                 await self._maybe_refresh_summary(conversation_id)
+                
                 intents_found = [
-                    getattr(action.intent, "value", action.intent) for action in assistant_response.actions
+                    getattr(action.intent, "value", action.intent) 
+                    for action in assistant_response.actions
                 ]
                 request_logger.info(
-                    "LLM parse_intent completed backend=langchain cached=%s intents=%s",
+                    "LLM classify_intent completed backend=langchain cached=%s "
+                    "pipeline=%s intents=%s",
                     llm_result.cached,
+                    llm_result.pipeline_path,
                     intents_found,
                 )
                 return assistant_response
+                
             except Exception as exc:  # pragma: no cover - safety fallback
                 logger.warning(
-                    "LangChain client failed for conversation_id=%s; falling back to deterministic reply. error=%s",
+                    "LangChain client failed for conversation_id=%s; error=%s",
                     conversation_id,
                     exc,
                 )
@@ -172,7 +264,8 @@ class AssistantClient:
         await self._maybe_refresh_summary(conversation_id)
         if debug_builder:
             debug_builder.set_llm_used(False).set_llm_cached(False)
-        request_logger.warning("LLM parse_intent failed or unavailable, backend=fallback")
+            debug_builder.set_pipeline_path("fallback")
+        request_logger.warning("LLM classify_intent failed or unavailable, backend=fallback")
         return fallback
 
     async def beautify_reply(
@@ -353,7 +446,10 @@ class AssistantClient:
         used: bool,
         backend: str | None,
         cached: bool,
+        pipeline_path: str | None = None,
+        llm_confidence: float | None = None,
     ) -> None:
+        """Добавляет debug информацию о LLM в response.meta."""
         meta = response.meta or AssistantMeta()
         debug_payload = dict(meta.debug or {})
         debug_payload.update(
@@ -363,6 +459,10 @@ class AssistantClient:
                 "llm_cached": cached,
             }
         )
+        if pipeline_path:
+            debug_payload["pipeline_path"] = pipeline_path
+        if llm_confidence is not None:
+            debug_payload["llm_confidence"] = round(llm_confidence, 2)
         meta.debug = debug_payload
         response.meta = meta
 

@@ -1,15 +1,80 @@
+"""
+LangChain LLM Client - Интеграция с LLM для AI-ассистента аптеки.
+
+================================================================================
+РОЛЬ LANGCHAIN В ПРОЕКТЕ
+================================================================================
+
+LangChain выступает как "умный мозг" ассистента со следующими задачами:
+
+1. КЛАССИФИКАЦИЯ ИНТЕНТОВ (Intent Classification)
+   - Получает сообщение пользователя и контекст
+   - Выбирает ОДИН интент из фиксированного списка IntentType
+   - Возвращает confidence (0-1) для ансамблевой логики с Router'ом
+   
+2. ИЗВЛЕЧЕНИЕ СЛОТОВ (Slot Extraction)
+   - Структурированное извлечение параметров через Pydantic-модели
+   - Поддерживаемые слоты: age, symptom, disease, price_min/max, dosage_form, etc.
+   - Использует with_structured_output для гарантии JSON-валидности
+   
+3. ГЕНЕРАЦИЯ ОТВЕТА (Reply Generation)
+   - Формирует человеко-понятный текст на русском языке
+   - Соблюдает медицинскую безопасность (не ставит диагнозов)
+   - Кратко, вежливо, информативно
+
+4. ДИЗАМБИГУАЦИЯ (Disambiguation)
+   - Когда Router не уверен, LLM выбирает из кандидатов
+   - Возвращает reasoning для отладки
+
+================================================================================
+PIPELINE ВЫЗОВА
+================================================================================
+
+Вызовы LangChain происходят в следующих сценариях:
+
+1. router_only - Router уверен (confidence >= 0.85)
+   → LangChain НЕ вызывается, используем результат Router'а
+   
+2. router+slots - Router уверен, но нужно извлечь слоты
+   → LangChain вызывается только для slot extraction (дешёвая операция)
+   
+3. router+llm - Router не уверен, есть кандидаты
+   → LangChain дизамбигуирует между кандидатами
+   → Возвращает LLMDisambiguationResult
+   
+4. llm_only - Router ничего не нашёл
+   → LangChain полностью определяет intent + slots
+   → Возвращает LLMIntentResult
+
+================================================================================
+КОНФИГУРАЦИЯ
+================================================================================
+
+Температура:
+- Intent classification: 0.1-0.2 (минимум галлюцинаций)
+- Reply beautification: 0.4-0.5 (немного креатива)
+
+Кэширование:
+- LangChain InMemoryCache для повторяющихся запросов
+- Кастомный CachingService для более гибкого TTL
+
+LangSmith:
+- Трейсинг всех вызовов для отладки
+- Метаданные: conversation_id, user_id, intent, pipeline_path
+"""
+
 from __future__ import annotations
 
 import json
-import os
 import logging
-from dataclasses import dataclass
-from typing import Any, Dict
+import os
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
 
 from langsmith import Client as LangSmithClient, traceable
 from langchain_core.caches import InMemoryCache
 from langchain_core.chat_history import BaseChatMessageHistory
-from langchain_core.exceptions import OutputParserException  # modern location
+from langchain_core.exceptions import OutputParserException
 from langchain_core.globals import set_llm_cache
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.runnables.history import RunnableWithMessageHistory
@@ -57,9 +122,20 @@ except Exception:  # noqa: BLE001
     LangChainCallbackHandler = None  # type: ignore[assignment]
 
 from ..config import Settings
-from ..models.assistant import AssistantResponse, Reply
+from ..intents import IntentType
+from ..models.assistant import AssistantMeta, AssistantResponse, AssistantAction, Reply
+from ..models.llm_intent import (
+    ExtractedSlots,
+    LLMDisambiguationResult,
+    LLMIntentResult,
+    LLMSlotExtractionResult,
+)
 from ..prompts.beautify_prompt import build_beautify_prompt
-from ..prompts.intent_prompt import build_intent_prompt
+from ..prompts.intent_prompt import (
+    build_intent_prompt,
+    build_disambiguation_prompt,
+    build_slot_extraction_prompt,
+)
 from .cache import CachingService, get_caching_service
 from .conversation_store import ConversationStore, get_conversation_store
 from .dialog_state_store import DialogState
@@ -67,21 +143,95 @@ from .dialog_state_store import DialogState
 logger = logging.getLogger(__name__)
 
 
+# =============================================================================
+# Константы
+# =============================================================================
+
+# Порог уверенности для использования результата Router'а без LLM
+ROUTER_CONFIDENCE_THRESHOLD = 0.85
+
+# Температура для разных задач
+INTENT_TEMPERATURE = 0.15  # Низкая для предсказуемости
+BEAUTIFY_TEMPERATURE = 0.45  # Выше для естественности
+
+# Timeout для LLM вызовов
+LLM_TIMEOUT_SECONDS = 30
+
+
+# =============================================================================
+# Data classes для результатов
+# =============================================================================
+
 @dataclass
 class LLMRunResult:
+    """Результат вызова LLM для классификации интента."""
+    
     response: AssistantResponse
-    token_usage: Dict[str, int]
+    token_usage: Dict[str, int] = field(default_factory=dict)
     cached: bool = False
+    
+    # Расширенные метаданные
+    llm_intent_result: Optional[LLMIntentResult] = None
+    pipeline_path: str = "llm_only"
+    router_confidence: Optional[float] = None
+    llm_confidence: Optional[float] = None
+    extracted_entities_before: Dict[str, Any] = field(default_factory=dict)
+    extracted_entities_after: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class BeautifyResult:
+    """Результат beautify_reply."""
+    
     reply: Reply
     cached: bool = False
 
 
+@dataclass  
+class IntentClassificationResult:
+    """Внутренний результат классификации интента."""
+    
+    intent: IntentType
+    confidence: float
+    slots: Dict[str, Any]
+    reply: str
+    reasoning: Optional[str] = None
+    needs_clarification: bool = False
+    missing_slots: List[str] = field(default_factory=list)
+
+
+# =============================================================================
+# Основной клиент
+# =============================================================================
+
 class LangchainLLMClient:
-    """Thin wrapper around LangChain to keep LLM usage centralized."""
+    """
+    Клиент LangChain для интеграции с LLM.
+    
+    Использование:
+        client = LangchainLLMClient(settings)
+        
+        # Полная классификация (intent + slots + reply)
+        result = await client.classify_intent(
+            message="У меня болит голова",
+            router_candidates=None,  # или список кандидатов от Router
+            ...
+        )
+        
+        # Дизамбигуация между кандидатами
+        result = await client.disambiguate(
+            message="...",
+            candidates=["FIND_BY_SYMPTOM", "FIND_BY_DISEASE"],
+            ...
+        )
+        
+        # Только извлечение слотов
+        slots = await client.extract_slots(
+            message="...",
+            intent=IntentType.FIND_BY_SYMPTOM,
+            ...
+        )
+    """
 
     def __init__(
         self,
@@ -95,63 +245,712 @@ class LangchainLLMClient:
         if not settings.openai_api_key:
             raise ValueError("OPENAI_API_KEY is required for LangChain mode")
 
+        self._settings = settings
         self._enable_llm_cache(settings)
         self._langsmith_client = self._setup_langsmith(settings)
         self._conversation_store = conversation_store or get_conversation_store()
         self._history_limit = history_limit
         callbacks = self._build_callbacks()
+        
+        # Основная LLM для intent classification (низкая температура)
         if llm is None:
-            llm = ChatOpenAI(
+            self._intent_llm_base = ChatOpenAI(
                 model=settings.openai_model,
                 api_key=settings.openai_api_key,
-                temperature=settings.openai_temperature,
-                timeout=settings.http_timeout_seconds,
+                temperature=INTENT_TEMPERATURE,
+                timeout=settings.http_timeout_seconds or LLM_TIMEOUT_SECONDS,
                 base_url=settings.openai_base_url,
                 callbacks=callbacks or None,
             )
-        self._llm = llm
+        else:
+            self._intent_llm_base = llm
+            
+        # LLM для beautify (повышенная температура)
+        self._beautify_llm_base = ChatOpenAI(
+            model=settings.openai_model,
+            api_key=settings.openai_api_key,
+            temperature=BEAUTIFY_TEMPERATURE,
+            timeout=settings.http_timeout_seconds or LLM_TIMEOUT_SECONDS,
+            base_url=settings.openai_base_url,
+            callbacks=callbacks or None,
+        )
+        
         self._llm_callbacks = callbacks or []
         self._cache = cache or get_caching_service()
-        schema_hint = json.dumps(AssistantResponse.model_json_schema(), ensure_ascii=False, indent=2)
+        
+        # Промпты
+        schema_hint = json.dumps(LLMIntentResult.model_json_schema(), ensure_ascii=False, indent=2)
         self._intent_prompt = build_intent_prompt(schema_hint)
         self._beautify_prompt = build_beautify_prompt()
-        # Structured output with built-in JSON Schema validation
-        self._intent_llm = self._llm.with_structured_output(
-            AssistantResponse,
+        
+        # Structured output для intent classification
+        self._intent_llm = self._intent_llm_base.with_structured_output(
+            LLMIntentResult,
             include_raw=True,
             strict=True,
         )
-        self._beautify_llm = self._llm.with_structured_output(
+        
+        # Structured output для beautify
+        self._beautify_llm = self._beautify_llm_base.with_structured_output(
             Reply,
             include_raw=True,
             strict=True,
         )
-        # Retry chain to auto-recover from transient parsing/validation failures
-        base_intent_chain = RunnableRetry(
+        
+        # Structured output для slot extraction
+        self._slot_extraction_llm = self._intent_llm_base.with_structured_output(
+            LLMSlotExtractionResult,
+            include_raw=True,
+            strict=True,
+        )
+        
+        # Structured output для disambiguation
+        self._disambiguation_llm = self._intent_llm_base.with_structured_output(
+            LLMDisambiguationResult,
+            include_raw=True,
+            strict=True,
+        )
+        
+        # Retry chains
+        self._intent_chain = RunnableRetry(
             self._intent_prompt | self._intent_llm,
             max_attempts=2,
             retry_if_exception_type=(OutputParserException, ValueError),
         )
+        
         self._beautify_chain = RunnableRetry(
             self._beautify_prompt | self._beautify_llm,
             max_attempts=2,
             retry_if_exception_type=(OutputParserException, ValueError),
         )
-        # Runnable with history for intent parsing (fallback to plain chain if listeners unsupported)
-        if hasattr(base_intent_chain, "with_listeners"):
+        
+        # History-aware chain для intent (если поддерживается)
+        if hasattr(self._intent_chain, "with_listeners"):
             self._intent_with_history = RunnableWithMessageHistory(
-                base_intent_chain,
+                self._intent_chain,
                 self._history_factory,
                 input_messages_key="context_messages",
                 history_messages_key="context_messages",
             )
         else:
-            self._intent_with_history = base_intent_chain
+            self._intent_with_history = self._intent_chain
+
+    # =========================================================================
+    # Основные публичные методы
+    # =========================================================================
+
+    @traceable(run_type="chain", name="classify_intent")
+    async def classify_intent(
+        self,
+        *,
+        message: str,
+        profile: Dict[str, Any] | None,
+        preference_summary: str | None = None,
+        dialog_state: DialogState | None,
+        ui_state: Dict[str, Any] | None,
+        available_intents: List[str],
+        router_candidates: List[Tuple[str, float]] | None = None,
+        router_slots: Dict[str, Any] | None = None,
+        conversation_id: str | None = None,
+        user_id: str | None = None,
+        trace_id: str | None = None,
+    ) -> LLMRunResult:
+        """
+        Классифицирует интент с помощью LLM.
+        
+        Если router_candidates предоставлены, LLM выбирает из них.
+        Иначе LLM самостоятельно определяет интент.
+        
+        Args:
+            message: Сообщение пользователя
+            profile: Профиль пользователя
+            preference_summary: Резюме предпочтений
+            dialog_state: Состояние диалога
+            ui_state: Состояние UI
+            available_intents: Список доступных интентов
+            router_candidates: Кандидаты от Router'а [(intent, confidence), ...]
+            router_slots: Слоты, извлечённые Router'ом
+            conversation_id: ID разговора
+            user_id: ID пользователя
+            trace_id: ID трассировки
+            
+        Returns:
+            LLMRunResult с классифицированным интентом
+        """
+        normalized_message = message.strip().lower()
+        profile_signature = json.dumps(profile or {}, ensure_ascii=False, sort_keys=True)
+        
+        # Проверяем кэш
+        cached = self._cache.get_llm_response(normalized_message, profile_signature)
+        if cached:
+            logger.info(
+                "trace_id=%s user_id=%s conversation_id=%s classify_intent cached=True",
+                trace_id or "-",
+                user_id or "-",
+                conversation_id or "-",
+            )
+            try:
+                llm_result = LLMIntentResult.model_validate(cached.get("llm_result", cached))
+                response = self._build_assistant_response(llm_result)
+                return LLMRunResult(
+                    response=response,
+                    token_usage={},
+                    cached=True,
+                    llm_intent_result=llm_result,
+                    pipeline_path=cached.get("pipeline_path", "llm_only"),
+                    llm_confidence=llm_result.confidence,
+                )
+            except Exception:
+                pass  # Cache miss on validation failure
+        
+        # Определяем pipeline path
+        pipeline_path = "llm_only"
+        if router_candidates:
+            pipeline_path = "router+llm"
+        
+        # Формируем payload для LLM
+        payload = {
+            "message": message,
+            "profile_json": profile_signature,
+            "preference_summary": preference_summary or "",
+            "dialog_state_json": json.dumps(self._dialog_state_to_dict(dialog_state), ensure_ascii=False),
+            "ui_state_json": json.dumps(ui_state or {}, ensure_ascii=False),
+            "available_intents": ", ".join(sorted(available_intents)),
+            "context_messages": [],
+        }
+        
+        # Добавляем кандидатов если есть
+        if router_candidates:
+            candidates_str = ", ".join([f"{intent}({conf:.2f})" for intent, conf in router_candidates])
+            payload["router_candidates"] = candidates_str
+        
+        # Добавляем предварительно извлечённые слоты
+        if router_slots:
+            payload["extracted_slots"] = json.dumps(router_slots, ensure_ascii=False)
+        
+        metadata = self._build_intent_metadata(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            dialog_state=dialog_state,
+            available_intents=available_intents,
+            ui_state=ui_state,
+            pipeline_path=pipeline_path,
+        )
+        
+        config = self._build_invoke_config(conversation_id, metadata)
+        
+        try:
+            if conversation_id:
+                result = await self._intent_with_history.ainvoke(payload, config=config)
+            else:
+                result = await self._intent_chain.ainvoke(payload, config=config)
+            
+            llm_result, ai_message = self._parse_llm_intent_result(result)
+            
+            # Мержим слоты от Router'а и LLM
+            if router_slots:
+                merged_slots = {**router_slots, **llm_result.slots.to_dict()}
+                llm_result.slots = ExtractedSlots(**merged_slots)
+            
+            # Кэшируем результат
+            cache_data = {
+                "llm_result": llm_result.model_dump(),
+                "pipeline_path": pipeline_path,
+            }
+            self._cache.set_llm_response(
+                normalized_message,
+                profile_signature,
+                cache_data,
+                ttl_seconds=900,
+            )
+            
+            response = self._build_assistant_response(llm_result)
+            usage = self._extract_usage(ai_message)
+            
+            logger.info(
+                "trace_id=%s user_id=%s conversation_id=%s classify_intent cached=False "
+                "intent=%s confidence=%.2f pipeline=%s tokens=%s",
+                trace_id or "-",
+                user_id or "-",
+                conversation_id or "-",
+                llm_result.intent.value,
+                llm_result.confidence,
+                pipeline_path,
+                usage,
+            )
+            
+            return LLMRunResult(
+                response=response,
+                token_usage=usage,
+                cached=False,
+                llm_intent_result=llm_result,
+                pipeline_path=pipeline_path,
+                llm_confidence=llm_result.confidence,
+                extracted_entities_before=router_slots or {},
+                extracted_entities_after=llm_result.slots.to_dict(),
+            )
+            
+        except Exception as exc:  # pragma: no cover - network level failures
+            logger.exception("LangChain classify_intent failed: %s", exc)
+            fallback = self._fallback_assistant_response(message=message)
+            return LLMRunResult(
+                response=fallback,
+                token_usage={},
+                cached=False,
+                pipeline_path="llm_only",
+            )
+
+    @traceable(run_type="chain", name="disambiguate")
+    async def disambiguate(
+        self,
+        *,
+        message: str,
+        candidates: List[str],
+        dialog_state: DialogState | None = None,
+        conversation_id: str | None = None,
+        trace_id: str | None = None,
+    ) -> LLMDisambiguationResult:
+        """
+        Дизамбигуирует между кандидатами интентов.
+        
+        Используется когда Router не уверен и предлагает несколько вариантов.
+        
+        Args:
+            message: Сообщение пользователя
+            candidates: Список интентов-кандидатов
+            dialog_state: Состояние диалога
+            conversation_id: ID разговора
+            trace_id: ID трассировки
+            
+        Returns:
+            LLMDisambiguationResult с выбранным интентом
+        """
+        prompt = build_disambiguation_prompt(candidates)
+        llm = self._intent_llm_base.with_structured_output(
+            LLMDisambiguationResult,
+            include_raw=True,
+            strict=True,
+        )
+        chain = RunnableRetry(
+            prompt | llm,
+            max_attempts=2,
+            retry_if_exception_type=(OutputParserException, ValueError),
+        )
+        
+        payload = {
+            "message": message,
+            "dialog_state_json": json.dumps(self._dialog_state_to_dict(dialog_state), ensure_ascii=False),
+        }
+        
+        try:
+            result = await chain.ainvoke(payload)
+            parsed, _ = self._parse_disambiguation_result(result)
+            
+            logger.info(
+                "trace_id=%s disambiguate selected=%s confidence=%.2f reason=%s",
+                trace_id or "-",
+                parsed.selected_intent.value,
+                parsed.confidence,
+                parsed.reasoning[:50] if parsed.reasoning else "-",
+            )
+            
+            return parsed
+            
+        except Exception as exc:
+            logger.exception("LangChain disambiguate failed: %s", exc)
+            # Fallback: выбираем первого кандидата
+            return LLMDisambiguationResult(
+                selected_intent=IntentType(candidates[0]) if candidates else IntentType.UNKNOWN,
+                confidence=0.5,
+                reasoning=f"Fallback due to error: {exc}",
+            )
+
+    @traceable(run_type="chain", name="extract_slots")
+    async def extract_slots(
+        self,
+        *,
+        message: str,
+        intent: IntentType,
+        existing_slots: Dict[str, Any] | None = None,
+        conversation_id: str | None = None,
+        trace_id: str | None = None,
+    ) -> ExtractedSlots:
+        """
+        Извлекает слоты для известного интента.
+        
+        Используется когда интент уже определён (Router'ом), но нужно
+        более качественно извлечь слоты.
+        
+        Args:
+            message: Сообщение пользователя
+            intent: Известный интент
+            existing_slots: Уже извлечённые слоты
+            conversation_id: ID разговора
+            trace_id: ID трассировки
+            
+        Returns:
+            ExtractedSlots с извлечёнными параметрами
+        """
+        prompt = build_slot_extraction_prompt(intent)
+        llm = self._intent_llm_base.with_structured_output(
+            LLMSlotExtractionResult,
+            include_raw=True,
+            strict=True,
+        )
+        chain = RunnableRetry(
+            prompt | llm,
+            max_attempts=2,
+            retry_if_exception_type=(OutputParserException, ValueError),
+        )
+        
+        payload = {
+            "message": message,
+            "intent": intent.value,
+            "existing_slots": json.dumps(existing_slots or {}, ensure_ascii=False),
+        }
+        
+        try:
+            result = await chain.ainvoke(payload)
+            parsed, _ = self._parse_slot_extraction_result(result)
+            
+            # Мержим с существующими слотами
+            if existing_slots:
+                merged = {**existing_slots, **parsed.slots.to_dict()}
+                return ExtractedSlots(**merged)
+            
+            logger.info(
+                "trace_id=%s extract_slots intent=%s slots=%s",
+                trace_id or "-",
+                intent.value,
+                list(parsed.slots.to_dict().keys()),
+            )
+            
+            return parsed.slots
+            
+        except Exception as exc:
+            logger.exception("LangChain extract_slots failed: %s", exc)
+            return ExtractedSlots(**(existing_slots or {}))
+
+    @traceable(run_type="chain", name="beautify_reply")
+    async def beautify_reply(
+        self,
+        *,
+        base_reply: Reply,
+        data: Dict[str, Any],
+        constraints: Dict[str, Any] | None = None,
+        conversation_id: str | None = None,
+        user_id: str | None = None,
+        intent: str | None = None,
+        router_matched: bool | None = None,
+        slot_filling_used: bool | None = None,
+        channel: str | None = None,
+        metadata: Dict[str, Any] | None = None,
+        trace_id: str | None = None,
+    ) -> BeautifyResult:
+        """
+        Улучшает текст ответа с помощью LLM.
+        
+        Делает ответ более естественным и дружелюбным.
+        """
+        # Compute cache keys
+        data_hash = self._cache.compute_data_hash(data)
+        constraints_hash = self._cache.compute_constraints_hash(constraints)
+        
+        # Check cache
+        cached = self._cache.get_beautify_response(
+            base_reply.text,
+            data_hash,
+            constraints_hash,
+        )
+        if cached:
+            try:
+                logger.info(
+                    "trace_id=%s user_id=%s conversation_id=%s beautify_reply cached=True",
+                    trace_id or "-",
+                    user_id or "-",
+                    conversation_id or "-",
+                )
+                return BeautifyResult(reply=Reply.model_validate(cached), cached=True)
+            except Exception:
+                pass  # Cache miss on validation failure
+        
+        payload = {
+            "base_reply": json.dumps(base_reply.model_dump(), ensure_ascii=False),
+            "data_json": json.dumps(data, ensure_ascii=False),
+            "constraints_json": json.dumps(constraints or {}, ensure_ascii=False),
+        }
+        
+        combined_metadata = self._build_beautify_metadata(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            intent=intent,
+            router_matched=router_matched,
+            slot_filling_used=slot_filling_used,
+            channel=channel,
+            extra=metadata,
+        )
+        
+        try:
+            config = self._build_invoke_config(conversation_id, combined_metadata)
+            result = await self._beautify_chain.ainvoke(payload, config=config)
+            reply, _ = self._parse_reply_json(result)
+            
+            # Cache the result
+            self._cache.set_beautify_response(
+                base_reply.text,
+                data_hash,
+                constraints_hash,
+                reply.model_dump(),
+                ttl_seconds=600,
+            )
+            
+            logger.info(
+                "trace_id=%s user_id=%s conversation_id=%s beautify_reply cached=False",
+                trace_id or "-",
+                user_id or "-",
+                conversation_id or "-",
+            )
+            
+            return BeautifyResult(reply=reply, cached=False)
+            
+        except Exception as exc:  # pragma: no cover - network level failures
+            logger.exception("LangChain beautify_reply failed: %s", exc)
+            return BeautifyResult(reply=base_reply, cached=False)
+
+    # =========================================================================
+    # Legacy API для обратной совместимости
+    # =========================================================================
+
+    async def parse_intent(
+        self,
+        *,
+        message: str,
+        profile: Dict[str, Any] | None,
+        preference_summary: str | None = None,
+        dialog_state: DialogState | None,
+        ui_state: Dict[str, Any] | None,
+        available_intents: List[str],
+        conversation_id: str | None = None,
+        user_id: str | None = None,
+        trace_id: str | None = None,
+    ) -> LLMRunResult:
+        """
+        Legacy метод для обратной совместимости.
+        
+        Переадресует вызов на classify_intent.
+        """
+        return await self.classify_intent(
+            message=message,
+            profile=profile,
+            preference_summary=preference_summary,
+            dialog_state=dialog_state,
+            ui_state=ui_state,
+            available_intents=available_intents,
+            conversation_id=conversation_id,
+            user_id=user_id,
+            trace_id=trace_id,
+        )
+
+    # =========================================================================
+    # Приватные методы - парсинг результатов
+    # =========================================================================
+
+    def _parse_llm_intent_result(self, result: Any) -> Tuple[LLMIntentResult, AIMessage | None]:
+        """Парсит результат LLM в LLMIntentResult."""
+        parsed = result
+        raw_message: AIMessage | None = None
+        
+        if isinstance(result, dict) and "parsed" in result:
+            parsed = result.get("parsed")
+            raw_message = result.get("raw")
+        elif hasattr(result, "raw"):
+            raw_message = getattr(result, "raw", None)
+            parsed = getattr(result, "parsed", result)
+        
+        if isinstance(parsed, LLMIntentResult):
+            return parsed, raw_message
+        
+        if isinstance(parsed, AIMessage):
+            raw_message = parsed
+            content = _extract_message_content(parsed)
+            try:
+                return LLMIntentResult.model_validate_json(content), raw_message
+            except Exception as exc:
+                logger.warning("Failed to parse LLMIntentResult JSON: %s; payload=%s", exc, content[:200])
+                return self._fallback_llm_intent_result(), raw_message
+        
+        try:
+            return LLMIntentResult.model_validate(parsed), raw_message
+        except Exception as exc:
+            logger.warning("Failed to parse LLMIntentResult: %s; payload=%s", exc, parsed)
+            return self._fallback_llm_intent_result(), raw_message
+
+    def _parse_disambiguation_result(self, result: Any) -> Tuple[LLMDisambiguationResult, AIMessage | None]:
+        """Парсит результат дизамбигуации."""
+        parsed = result
+        raw_message: AIMessage | None = None
+        
+        if isinstance(result, dict) and "parsed" in result:
+            parsed = result.get("parsed")
+            raw_message = result.get("raw")
+        elif hasattr(result, "raw"):
+            raw_message = getattr(result, "raw", None)
+            parsed = getattr(result, "parsed", result)
+        
+        if isinstance(parsed, LLMDisambiguationResult):
+            return parsed, raw_message
+        
+        try:
+            return LLMDisambiguationResult.model_validate(parsed), raw_message
+        except Exception as exc:
+            logger.warning("Failed to parse LLMDisambiguationResult: %s", exc)
+            return LLMDisambiguationResult(
+                selected_intent=IntentType.UNKNOWN,
+                confidence=0.5,
+                reasoning="Parse error",
+            ), raw_message
+
+    def _parse_slot_extraction_result(self, result: Any) -> Tuple[LLMSlotExtractionResult, AIMessage | None]:
+        """Парсит результат извлечения слотов."""
+        parsed = result
+        raw_message: AIMessage | None = None
+        
+        if isinstance(result, dict) and "parsed" in result:
+            parsed = result.get("parsed")
+            raw_message = result.get("raw")
+        elif hasattr(result, "raw"):
+            raw_message = getattr(result, "raw", None)
+            parsed = getattr(result, "parsed", result)
+        
+        if isinstance(parsed, LLMSlotExtractionResult):
+            return parsed, raw_message
+        
+        try:
+            return LLMSlotExtractionResult.model_validate(parsed), raw_message
+        except Exception as exc:
+            logger.warning("Failed to parse LLMSlotExtractionResult: %s", exc)
+            return LLMSlotExtractionResult(
+                slots=ExtractedSlots(),
+                confidence=0.5,
+            ), raw_message
+
+    def _parse_reply_json(self, result: Any) -> Tuple[Reply, AIMessage | None]:
+        """Парсит результат beautify."""
+        parsed = result
+        raw_message: AIMessage | None = None
+        
+        if isinstance(result, dict) and "parsed" in result:
+            parsed = result.get("parsed")
+            raw_message = result.get("raw")
+        elif hasattr(result, "raw"):
+            raw_message = getattr(result, "raw", None)
+            parsed = getattr(result, "parsed", result)
+        
+        if isinstance(parsed, Reply):
+            return parsed, raw_message
+        
+        if isinstance(parsed, AIMessage):
+            raw_message = parsed
+            content = _extract_message_content(parsed)
+            try:
+                return Reply.model_validate_json(content), raw_message
+            except Exception as exc:
+                logger.warning("Failed to parse Reply JSON: %s; payload=%s", exc, content[:200])
+                return Reply(text=content if isinstance(content, str) else "Готово."), raw_message
+        
+        try:
+            return Reply.model_validate(parsed), raw_message
+        except Exception as exc:
+            logger.warning("Failed to parse Reply: %s; payload=%s", exc, parsed)
+            return Reply(text=str(parsed) if parsed else "Готово."), raw_message
+
+    # =========================================================================
+    # Приватные методы - построение ответов
+    # =========================================================================
+
+    def _build_assistant_response(self, llm_result: LLMIntentResult) -> AssistantResponse:
+        """Строит AssistantResponse из LLMIntentResult."""
+        from ..intents import ActionType, ActionChannel
+        
+        # Определяем channel по интенту
+        channel = self._get_channel_for_intent(llm_result.intent)
+        
+        # Формируем action
+        action = AssistantAction(
+            type=ActionType.CALL_PLATFORM_API,
+            intent=llm_result.intent,
+            channel=channel,
+            parameters=llm_result.slots.to_dict(),
+        )
+        
+        meta = AssistantMeta(
+            top_intent=llm_result.intent.value,
+            confidence=llm_result.confidence,
+            extracted_entities=llm_result.slots.to_dict(),
+            debug={
+                "llm_used": True,
+                "llm_confidence": llm_result.confidence,
+                "reasoning": llm_result.reasoning,
+                "needs_clarification": llm_result.needs_clarification,
+                "missing_slots": llm_result.missing_required_slots,
+            },
+        )
+        
+        return AssistantResponse(
+            reply=Reply(text=llm_result.reply),
+            actions=[action],
+            meta=meta,
+        )
+
+    def _get_channel_for_intent(self, intent: IntentType) -> str:
+        """Определяет channel для интента."""
+        from ..intents import NAVIGATION_INTENTS, ORDER_INTENTS, SYMPTOM_INTENTS
+        
+        if intent in NAVIGATION_INTENTS:
+            return "navigation"
+        if intent in ORDER_INTENTS:
+            return "order"
+        if intent in SYMPTOM_INTENTS:
+            return "data"
+        return "data"
+
+    @staticmethod
+    def _fallback_llm_intent_result() -> LLMIntentResult:
+        """Возвращает fallback результат при ошибке парсинга."""
+        return LLMIntentResult(
+            intent=IntentType.UNKNOWN,
+            confidence=0.3,
+            slots=ExtractedSlots(),
+            reply="Не удалось обработать запрос. Пожалуйста, переформулируйте вопрос.",
+            reasoning="Fallback due to parse error",
+        )
+
+    @staticmethod
+    def _fallback_assistant_response(message: str | None = None) -> AssistantResponse:
+        """Возвращает fallback AssistantResponse при ошибке."""
+        reply_text = (
+            "Не удалось обработать запрос автоматически. "
+            "Пожалуйста, переформулируйте вопрос или выберите подсказку ниже."
+        )
+        if message:
+            reply_text += f" Последнее сообщение: \"{message.strip()[:50]}\"."
+        
+        return AssistantResponse(
+            reply=Reply(text=reply_text),
+            actions=[],
+            meta=AssistantMeta(
+                confidence=0.3,
+                debug={"llm_used": True, "fallback": True},
+            ),
+        )
+
+    # =========================================================================
+    # Приватные методы - конфигурация и утилиты
+    # =========================================================================
 
     @staticmethod
     def _setup_langsmith(settings: Settings) -> LangSmithClient | None:
         """Initialize LangSmith tracing when enabled via settings/env."""
-
         tracing_enabled = bool(settings.langsmith_tracing_v2 or settings.langchain_tracing)
         if tracing_enabled:
             os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
@@ -207,242 +1006,13 @@ class LangchainLLMClient:
             logger.warning("Failed to initialize LangSmith callback handler: %s", exc)
             return []
 
-    @traceable(run_type="chain", name="parse_intent")
-    async def parse_intent(
-        self,
-        *,
-        message: str,
-        profile: Dict[str, Any] | None,
-        preference_summary: str | None = None,
-        dialog_state: DialogState | None,
-        ui_state: Dict[str, Any] | None,
-        available_intents: list[str],
-        conversation_id: str | None = None,
-        user_id: str | None = None,
-        trace_id: str | None = None,
-    ) -> LLMRunResult:
-        normalized_message = message.strip().lower()
-        profile_signature = json.dumps(profile or {}, ensure_ascii=False, sort_keys=True)
-        cached = self._cache.get_llm_response(normalized_message, profile_signature)
-        if cached:
-            logger.info(
-                "trace_id=%s user_id=%s conversation_id=%s intent=parse_intent cached=True",
-                trace_id or "-",
-                user_id or "-",
-                conversation_id or "-",
-            )
-            return LLMRunResult(
-                response=AssistantResponse.model_validate(cached),
-                token_usage={},
-                cached=True,
-            )
-        payload = {
-            "message": message,
-            "profile_json": profile_signature,
-            "preference_summary": preference_summary or "",
-            "dialog_state_json": json.dumps(self._dialog_state_to_dict(dialog_state), ensure_ascii=False),
-            "ui_state_json": json.dumps(ui_state or {}, ensure_ascii=False),
-            "available_intents": ", ".join(sorted(available_intents)),
-            "context_messages": [],
-        }
-        metadata = self._build_intent_metadata(
-            conversation_id=conversation_id,
-            user_id=user_id,
-            dialog_state=dialog_state,
-            available_intents=available_intents,
-            ui_state=ui_state,
-        )
-        config = self._build_invoke_config(conversation_id, metadata)
-        try:
-            if conversation_id:
-                result = await self._intent_with_history.ainvoke(
-                    payload,
-                    config=config,
-                )
-            else:
-                result = await self._invoke_with_retry(
-                    self._intent_prompt,
-                    self._intent_llm,
-                    payload,
-                    metadata=metadata,
-                    conversation_id=conversation_id,
-                )
-            response, ai_message = self._parse_assistant_response(result)
-            self._cache.set_llm_response(
-                normalized_message,
-                profile_signature,
-                response.model_dump(),
-                ttl_seconds=900,
-            )
-            usage = self._extract_usage(ai_message)
-            logger.info(
-                "trace_id=%s user_id=%s conversation_id=%s intent=parse_intent cached=False tokens=%s",
-                trace_id or "-",
-                user_id or "-",
-                conversation_id or "-",
-                usage,
-            )
-            return LLMRunResult(response=response, token_usage=usage, cached=False)
-        except Exception as exc:  # pragma: no cover - network level failures
-            logger.exception("LangChain parse_intent failed: %s", exc)
-            fallback = self._fallback_assistant_response(message=message)
-            return LLMRunResult(response=fallback, token_usage={}, cached=False)
-
-    @traceable(run_type="chain", name="beautify_reply")
-    async def beautify_reply(
-        self,
-        *,
-        base_reply: Reply,
-        data: Dict[str, Any],
-        constraints: Dict[str, Any] | None = None,
-        conversation_id: str | None = None,
-        user_id: str | None = None,
-        intent: str | None = None,
-        router_matched: bool | None = None,
-        slot_filling_used: bool | None = None,
-        channel: str | None = None,
-        metadata: Dict[str, Any] | None = None,
-        trace_id: str | None = None,
-    ) -> BeautifyResult:
-        """Polish the reply text using LLM with caching support."""
-        # Compute cache keys
-        data_hash = self._cache.compute_data_hash(data)
-        constraints_hash = self._cache.compute_constraints_hash(constraints)
-        
-        # Check cache
-        cached = self._cache.get_beautify_response(
-            base_reply.text,
-            data_hash,
-            constraints_hash,
-        )
-        if cached:
-            try:
-                logger.info(
-                    "trace_id=%s user_id=%s conversation_id=%s intent=beautify_reply cached=True",
-                    trace_id or "-",
-                    user_id or "-",
-                    conversation_id or "-",
-                )
-                return BeautifyResult(reply=Reply.model_validate(cached), cached=True)
-            except Exception:
-                pass  # Cache miss on validation failure
-        
-        payload = {
-            "base_reply": json.dumps(base_reply.model_dump(), ensure_ascii=False),
-            "data_json": json.dumps(data, ensure_ascii=False),
-            "constraints_json": json.dumps(constraints or {}, ensure_ascii=False),
-        }
-        combined_metadata = self._build_beautify_metadata(
-            conversation_id=conversation_id,
-            user_id=user_id,
-            intent=intent,
-            router_matched=router_matched,
-            slot_filling_used=slot_filling_used,
-            channel=channel,
-            extra=metadata,
-        )
-        try:
-            result = await self._invoke_with_retry(
-                self._beautify_prompt,
-                self._beautify_llm,
-                payload,
-                beautify=True,
-                metadata=combined_metadata,
-                conversation_id=conversation_id,
-            )
-            reply, _ = self._parse_reply_json(result)
-            # Cache the result
-            self._cache.set_beautify_response(
-                base_reply.text,
-                data_hash,
-                constraints_hash,
-                reply.model_dump(),
-                ttl_seconds=600,
-            )
-            logger.info(
-                "trace_id=%s user_id=%s conversation_id=%s intent=beautify_reply cached=False",
-                trace_id or "-",
-                user_id or "-",
-                conversation_id or "-",
-            )
-            return BeautifyResult(reply=reply, cached=False)
-        except Exception as exc:  # pragma: no cover - network level failures
-            logger.exception("LangChain beautify_reply failed: %s", exc)
-            return BeautifyResult(reply=base_reply, cached=False)
-
-    async def _invoke_with_retry(
-        self,
-        prompt,
-        llm_runnable,
-        payload: Dict[str, Any],
-        beautify: bool = False,
-        metadata: Dict[str, Any] | None = None,
-        conversation_id: str | None = None,
-    ):
-        """Helper to run prompt+LLM with retry when history is not used."""
-        chain = self._beautify_chain if beautify else RunnableRetry(
-            prompt | llm_runnable,
-            max_attempts=2,
-            retry_if_exception_type=(OutputParserException, ValueError),
-        )
-        config = self._build_invoke_config(conversation_id=conversation_id, metadata=metadata)
-        return await chain.ainvoke(payload, config=config)
-
-    def _parse_assistant_response(self, result: Any) -> tuple[AssistantResponse, AIMessage | None]:
-        parsed = result
-        raw_message: AIMessage | None = None
-        if isinstance(result, dict) and "parsed" in result:
-            parsed = result.get("parsed")
-            raw_message = result.get("raw")
-        elif hasattr(result, "raw"):
-            raw_message = getattr(result, "raw", None)
-            parsed = getattr(result, "parsed", result)
-        if isinstance(parsed, AssistantResponse):
-            return parsed, raw_message
-        if isinstance(parsed, AIMessage):
-            raw_message = parsed
-            content = _extract_message_content(parsed)
-            try:
-                return AssistantResponse.model_validate_json(content), raw_message
-            except Exception as exc:
-                logger.warning("Failed to parse AssistantResponse JSON: %s; payload=%s", exc, content)
-                return LangchainLLMClient._fallback_assistant_response(), raw_message
-        try:
-            return AssistantResponse.model_validate(parsed), raw_message
-        except Exception as exc:  # pragma: no cover - parser fallback
-            logger.warning("Failed to parse AssistantResponse: %s; payload=%s", exc, parsed)
-            return LangchainLLMClient._fallback_assistant_response(), raw_message
-
-    def _parse_reply_json(self, result: Any) -> tuple[Reply, AIMessage | None]:
-        parsed = result
-        raw_message: AIMessage | None = None
-        if isinstance(result, dict) and "parsed" in result:
-            parsed = result.get("parsed")
-            raw_message = result.get("raw")
-        elif hasattr(result, "raw"):
-            raw_message = getattr(result, "raw", None)
-            parsed = getattr(result, "parsed", result)
-        if isinstance(parsed, Reply):
-            return parsed, raw_message
-        if isinstance(parsed, AIMessage):
-            raw_message = parsed
-            content = _extract_message_content(parsed)
-            try:
-                return Reply.model_validate_json(content), raw_message
-            except Exception as exc:
-                logger.warning("Failed to parse Reply JSON: %s; payload=%s", exc, content)
-                return Reply(text=content if isinstance(content, str) else "Готово."), raw_message
-        try:
-            return Reply.model_validate(parsed), raw_message
-        except Exception as exc:  # pragma: no cover - parser fallback
-            logger.warning("Failed to parse Reply: %s; payload=%s", exc, parsed)
-            return Reply(text=str(parsed) if parsed else "Готово."), raw_message
-
     def _history_factory(self, session_id: str) -> BaseChatMessageHistory:
         return _ConversationStoreHistory(self._conversation_store, session_id, self._history_limit)
 
     @staticmethod
-    def _extract_usage(message: AIMessage) -> Dict[str, int]:
+    def _extract_usage(message: AIMessage | None) -> Dict[str, int]:
+        if message is None:
+            return {}
         metadata = getattr(message, "response_metadata", {}) or {}
         usage = metadata.get("token_usage") or {}
         return {k: int(v) for k, v in usage.items() if isinstance(v, (int, float))}
@@ -465,16 +1035,16 @@ class LangchainLLMClient:
         conversation_id: str | None,
         user_id: str | None,
         dialog_state: DialogState | None,
-        available_intents: list[str],
+        available_intents: List[str],
         ui_state: Dict[str, Any] | None,
+        pipeline_path: str = "llm_only",
     ) -> Dict[str, Any]:
         metadata = {
             "conversation_id": conversation_id,
             "user_id": user_id,
             "channel": getattr(dialog_state, "channel", None),
             "intent": getattr(dialog_state, "current_intent", None),
-            "router_matched": False,
-            "slot_filling_used": False,
+            "pipeline_path": pipeline_path,
             "available_intents": sorted(available_intents),
         }
         if ui_state:
@@ -516,20 +1086,10 @@ class LangchainLLMClient:
                 normalized[key] = value
         return normalized
 
-    @staticmethod
-    def _fallback_assistant_response(message: str | None = None) -> AssistantResponse:
-        reply_text = (
-            "Не удалось обработать запрос автоматически. "
-            "Пожалуйста, переформулируйте вопрос или выберите подсказку ниже."
-        )
-        if message:
-            reply_text += f" Последнее сообщение: \"{message.strip()}\"."
-        return AssistantResponse(
-            reply=Reply(text=reply_text),
-            actions=[],
-            meta=None,
-        )
 
+# =============================================================================
+# Helper classes
+# =============================================================================
 
 def _extract_message_content(message: AIMessage) -> str:
     if isinstance(message.content, str):

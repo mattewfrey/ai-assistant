@@ -132,6 +132,18 @@ class ChatResponse(BaseModel):
     ui_state: Optional[Dict[str, Any]] = None
 
 
+# Import LLM intent models
+from .llm_intent import (
+    ExtractedSlots,
+    LLMDisambiguationResult,
+    LLMIntentResult,
+    LLMSlotExtractionResult,
+    SlotType,
+    merge_router_and_llm_slots,
+    slots_to_parameters,
+)
+
+
 # Re-export assistant models for convenience
 __all__ = [
     "ActionChannel",
@@ -143,10 +155,17 @@ __all__ = [
     "ChatRequest",
     "ChatResponse",
     "DataPayload",
+    "ExtractedSlots",
     "IntentType",
+    "LLMDisambiguationResult",
+    "LLMIntentResult",
+    "LLMSlotExtractionResult",
     "Reply",
+    "SlotType",
     "UIState",
     "UserPreferences",
     "UserProfile",
+    "merge_router_and_llm_slots",
+    "slots_to_parameters",
 ]
 

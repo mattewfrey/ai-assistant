@@ -1,12 +1,46 @@
 """
 DebugMetaBuilder - Построитель диагностической информации для meta.debug.
 
-Собирает информацию о пайплайне обработки запроса:
-- Сработал ли Router
-- Использовался ли LLM
-- Какие слоты заполнены
-- Какой путь обработки (pipeline_path)
-- Метрики и тайминги
+================================================================================
+СОБИРАЕМАЯ ИНФОРМАЦИЯ
+================================================================================
+
+Основные флаги:
+- llm_used: bool - использовался ли LLM
+- llm_cached: bool - был ли ответ из кэша
+- router_matched: bool - сработал ли Router
+- slot_filling_used: bool - использовалось ли уточнение слотов
+
+Pipeline информация:
+- pipeline_path: str - путь обработки:
+  * "router_only" - только Router
+  * "router+slots" - Router + уточнение слотов
+  * "router+llm" - Router + LLM дизамбигуация
+  * "llm_only" - только LLM
+  * "llm+platform" - LLM + вызов платформы
+- intent_chain: List[str] - цепочка интентов
+
+Router информация:
+- router_confidence: float - уверенность Router'а
+- router_match_type: str - тип матча (keyword, symptom, etc.)
+- matched_triggers: List[str] - сработавшие триггеры
+- router_candidates: List[dict] - кандидаты для LLM
+
+LLM информация:
+- llm_confidence: float - уверенность LLM
+- llm_backend: str - бэкенд (langchain)
+- llm_reasoning: str - объяснение от LLM
+
+Слоты/сущности:
+- extracted_entities_before: Dict - сущности до LLM
+- extracted_entities_after: Dict - сущности после LLM
+- filled_slots: List[str] - заполненные слоты
+- missing_slots: List[str] - недостающие слоты
+- pending_slots: bool - есть ли ожидающие слоты
+
+Идентификаторы:
+- trace_id: str - ID трассировки
+- request_id: str - ID запроса
 """
 
 from __future__ import annotations
@@ -58,13 +92,17 @@ class DebugMetaBuilder:
         self._router_confidence: Optional[float] = None
         self._router_match_type: Optional[str] = None
         self._matched_triggers: List[str] = []
+        self._router_candidates: List[Dict[str, Any]] = []  # Кандидаты для LLM
         
         # LLM-специфичная информация
         self._llm_confidence: Optional[float] = None
         self._llm_backend: Optional[str] = None
+        self._llm_reasoning: Optional[str] = None  # Объяснение от LLM
         
-        # Извлеченные сущности
+        # Извлеченные сущности (до и после LLM)
         self._extracted_entities: Dict[str, Any] = {}
+        self._extracted_entities_before: Dict[str, Any] = {}  # До LLM
+        self._extracted_entities_after: Dict[str, Any] = {}  # После LLM
         
         # Дополнительные данные
         self._extra: Dict[str, Any] = {}
@@ -181,6 +219,16 @@ class DebugMetaBuilder:
         self._llm_backend = backend
         return self
 
+    def set_llm_reasoning(self, reasoning: str) -> "DebugMetaBuilder":
+        """Устанавливает объяснение от LLM."""
+        self._llm_reasoning = reasoning
+        return self
+
+    def set_router_candidates(self, candidates: List[Dict[str, Any]]) -> "DebugMetaBuilder":
+        """Устанавливает кандидатов Router'а для LLM дизамбигуации."""
+        self._router_candidates = candidates[:5]
+        return self
+
     # =========================================================================
     # Слоты и сущности
     # =========================================================================
@@ -203,6 +251,16 @@ class DebugMetaBuilder:
     def add_extracted_entity(self, name: str, value: Any) -> "DebugMetaBuilder":
         """Добавляет извлеченную сущность."""
         self._extracted_entities[name] = value
+        return self
+
+    def set_extracted_entities_before(self, entities: Dict[str, Any]) -> "DebugMetaBuilder":
+        """Устанавливает сущности ДО обработки LLM (от Router'а)."""
+        self._extracted_entities_before = entities
+        return self
+
+    def set_extracted_entities_after(self, entities: Dict[str, Any]) -> "DebugMetaBuilder":
+        """Устанавливает сущности ПОСЛЕ обработки LLM."""
+        self._extracted_entities_after = entities
         return self
 
     # =========================================================================
@@ -314,13 +372,11 @@ class DebugMetaBuilder:
         if self._source:
             payload["source"] = self._source
         else:
-            # Автоматически определяем source если не задан
             payload["source"] = self._infer_source()
         
         if self._pipeline_path:
             payload["pipeline_path"] = self._pipeline_path
         else:
-            # Автоматически определяем pipeline_path
             payload["pipeline_path"] = self._infer_pipeline_path()
         
         # Идентификаторы
@@ -344,16 +400,24 @@ class DebugMetaBuilder:
             payload["router_match_type"] = self._router_match_type
         if self._matched_triggers:
             payload["matched_triggers"] = self._matched_triggers
+        if self._router_candidates:
+            payload["router_candidates"] = self._router_candidates
         
         # LLM-информация
         if self._llm_confidence is not None:
             payload["llm_confidence"] = round(self._llm_confidence, 2)
         if self._llm_backend:
             payload["llm_backend"] = self._llm_backend
+        if self._llm_reasoning:
+            payload["llm_reasoning"] = self._llm_reasoning
         
-        # Сущности
+        # Сущности (включая до/после LLM)
         if self._extracted_entities:
             payload["extracted_entities"] = self._extracted_entities
+        if self._extracted_entities_before:
+            payload["extracted_entities_before"] = self._extracted_entities_before
+        if self._extracted_entities_after:
+            payload["extracted_entities_after"] = self._extracted_entities_after
         
         # Дополнительные данные
         payload.update(self._extra)

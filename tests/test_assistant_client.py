@@ -56,14 +56,25 @@ class StubLangchainClient:
         self.error = error
         self.calls: list[dict] = []
 
-    async def parse_intent(self, **kwargs):
+    async def classify_intent(self, **kwargs):
+        """Новый метод для классификации интента."""
         self.calls.append(kwargs)
         if self.error:
             raise self.error
-        return LLMRunResult(response=self.response, token_usage={}, cached=False)
+        return LLMRunResult(
+            response=self.response, 
+            token_usage={}, 
+            cached=False,
+            pipeline_path="llm_only",
+        )
+
+    async def parse_intent(self, **kwargs):
+        """Legacy метод для обратной совместимости."""
+        return await self.classify_intent(**kwargs)
 
     async def beautify_reply(self, **kwargs):
-        return Reply(text="beautified")
+        from app.services.langchain_llm import BeautifyResult
+        return BeautifyResult(reply=Reply(text="beautified"), cached=False)
 
 
 def test_analyze_message_prefers_langchain():
