@@ -9,14 +9,17 @@ from ..models import ChatRequest, DataPayload, UserProfile
 from ..models.assistant import AssistantMeta, AssistantResponse, Reply
 from .conversation_store import ConversationStore, get_conversation_store
 from .dialog_state_store import DialogStateStore, get_dialog_state_store
+from .debug_meta import DebugMetaBuilder
+from .error_handling import LLMError
 from .langchain_llm import LangchainLLMClient
+from .logging_utils import log_info, log_warning
 from .metrics import get_metrics_service
 from .user_profile_store import UserProfileStore, get_user_profile_store
 
 logger = logging.getLogger(__name__)
 
 
-class AssistantClientError(RuntimeError):
+class AssistantClientError(LLMError):
     """Raised when the assistant integration fails."""
 
 
@@ -69,7 +72,14 @@ class AssistantClient:
         self._summary_refresh_interval = 6
         self._summary_history_limit = 20
 
-    async def analyze_message(self, request: ChatRequest, intents: List[str]) -> AssistantResponse:
+    async def analyze_message(
+        self,
+        request: ChatRequest,
+        intents: List[str],
+        *,
+        debug_builder: DebugMetaBuilder | None = None,
+        trace_id: str | None = None,
+    ) -> AssistantResponse:
         """Send the user message to ChatGPT and parse the structured reply."""
 
         conversation_id = request.conversation_id or ""
@@ -81,6 +91,15 @@ class AssistantClient:
             fallback = self._build_fallback_response(request, reason="missing_api_key")
             self._record_exchange(conversation_id, request.message, fallback.reply.text)
             await self._maybe_refresh_summary(conversation_id)
+            if debug_builder:
+                debug_builder.set_llm_used(False).set_llm_cached(False)
+            log_warning(
+                logger,
+                "LLM unavailable (no API key), returning fallback response",
+                trace_id=trace_id,
+                user_id=request.user_id,
+                conversation_id=conversation_id,
+            )
             return fallback
 
         user_profile: UserProfile | None = None
@@ -98,6 +117,9 @@ class AssistantClient:
                     dialog_state=dialog_state,
                     ui_state=request.ui_state.model_dump() if request.ui_state else None,
                     available_intents=intents,
+                    conversation_id=conversation_id,
+                    user_id=request.user_id,
+                    trace_id=trace_id,
                 )
                 assistant_response = llm_result.response
                 self._metrics.record_llm_call(
@@ -105,14 +127,25 @@ class AssistantClient:
                     cached=llm_result.cached,
                     token_usage=llm_result.token_usage,
                 )
-                self._attach_llm_debug(
-                    assistant_response,
-                    used=not llm_result.cached,
-                    backend="langchain",
-                    cached=llm_result.cached,
-                )
+                if debug_builder:
+                    debug_builder.set_llm_used(True, cached=llm_result.cached)
+                else:
+                    self._attach_llm_debug(
+                        assistant_response,
+                        used=not llm_result.cached,
+                        backend="langchain",
+                        cached=llm_result.cached,
+                    )
                 self._record_exchange(conversation_id, request.message, assistant_response.reply.text)
                 await self._maybe_refresh_summary(conversation_id)
+                log_info(
+                    logger,
+                    "LLM parse_intent completed",
+                    trace_id=trace_id,
+                    user_id=request.user_id,
+                    conversation_id=conversation_id,
+                    intent=assistant_response.actions[0].intent if assistant_response.actions else None,
+                )
                 return assistant_response
             except Exception as exc:  # pragma: no cover - safety fallback
                 logger.warning(
@@ -124,6 +157,15 @@ class AssistantClient:
         fallback = self._build_fallback_response(request, reason="missing_llm")
         self._record_exchange(conversation_id, request.message, fallback.reply.text)
         await self._maybe_refresh_summary(conversation_id)
+        if debug_builder:
+            debug_builder.set_llm_used(False).set_llm_cached(False)
+        log_warning(
+            logger,
+            "LLM parse_intent failed or unavailable, using fallback",
+            trace_id=trace_id,
+            user_id=request.user_id,
+            conversation_id=conversation_id,
+        )
         return fallback
 
     async def beautify_reply(
@@ -133,6 +175,14 @@ class AssistantClient:
         data: DataPayload,
         constraints: Dict[str, Any] | None = None,
         user_message: str | None = None,
+        conversation_id: str | None = None,
+        user_id: str | None = None,
+        intent: str | None = None,
+        router_matched: bool | None = None,
+        slot_filling_used: bool | None = None,
+        channel: str | None = None,
+        trace_metadata: Dict[str, Any] | None = None,
+        debug_builder: DebugMetaBuilder | None = None,
     ) -> Reply:
         if not self._settings.openai_api_key:
             self._metrics.record_beautify_skipped()
@@ -150,9 +200,20 @@ class AssistantClient:
                 base_reply=reply,
                 data=data.model_dump(),
                 constraints=constraint_payload,
+                conversation_id=conversation_id,
+                user_id=user_id,
+                intent=intent,
+                router_matched=router_matched,
+                slot_filling_used=slot_filling_used,
+                channel=channel,
+                metadata=trace_metadata,
             )
-            self._metrics.record_beautify_call(cached=result.cached)
-            return result.reply
+            cached = getattr(result, "cached", False)
+            reply_obj = getattr(result, "reply", result)
+            self._metrics.record_beautify_call(cached=cached)
+            if debug_builder:
+                debug_builder.set_llm_used(True, cached=cached)
+            return reply_obj
         except Exception as exc:  # pragma: no cover - network/network issues
             logger.warning("Beautify reply failed: %s", exc)
             self._metrics.record_beautify_skipped()

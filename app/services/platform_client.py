@@ -4,12 +4,14 @@ import logging
 import uuid
 from typing import Any, Awaitable, Callable, Dict, List, Sequence
 
+from langsmith import traceable
 import httpx
 from pydantic import BaseModel, Field, ValidationError
 
 from ..config import Settings
 from ..intents import IntentType
 from ..models import AssistantAction, ChatRequest, DataPayload, UserProfile
+from .error_handling import UpstreamError
 from .mock_platform import MockPlatform
 from .cache import get_caching_service
 
@@ -41,6 +43,9 @@ class DataProduct(BaseModel):
     promo_flags: List[str] = Field(default_factory=list)
     score: float | None = None
     dosage_form: str | None = None
+    inn: str | None = None
+    manufacturer: str | None = None
+    country: str | None = None
 
     @property
     def is_available(self) -> bool:
@@ -53,7 +58,7 @@ class DataProduct(BaseModel):
         return True
 
 
-class PlatformApiClientError(RuntimeError):
+class PlatformApiClientError(UpstreamError):
     """Raised when the platform API fails."""
 
 
@@ -274,6 +279,7 @@ class PlatformApiClient:
             return DataPayload(orders=[payload])
         return DataPayload()
 
+    @traceable(run_type="tool", name="platform_fetch_products")
     async def fetch_products(
         self,
         intent: IntentType,
@@ -342,6 +348,7 @@ class PlatformApiClient:
             user_profile=user_profile,
             price_max=price_limit,
             intent=IntentType.FIND_BY_SYMPTOM,
+            dosage_form=parameters.get("dosage_form"),
         )
 
     async def find_by_disease(
@@ -374,6 +381,7 @@ class PlatformApiClient:
             user_profile=user_profile,
             price_max=price_limit,
             intent=IntentType.FIND_BY_DISEASE,
+            dosage_form=parameters.get("dosage_form"),
         )
 
     async def find_by_meta_filters(
@@ -399,6 +407,7 @@ class PlatformApiClient:
             user_profile=user_profile,
             price_max=price_limit,
             intent=IntentType.FIND_BY_META_FILTERS,
+            dosage_form=parameters.get("dosage_form"),
         )
 
     async def find_by_category(
@@ -434,6 +443,7 @@ class PlatformApiClient:
             user_profile=user_profile,
             price_max=price_limit,
             intent=IntentType.FIND_BY_CATEGORY,
+            dosage_form=parameters.get("dosage_form"),
         )
 
     async def find_by_name(
@@ -918,6 +928,7 @@ class PlatformApiClient:
         user_profile: UserProfile | None = None,
         price_max: float | None = None,
         intent: IntentType | None = None,
+        dosage_form: str | None = None,
     ) -> List[DataProduct]:
         filtered = self._filter_products(
             products,
@@ -926,6 +937,7 @@ class PlatformApiClient:
             meta_filters=meta_filters,
             user_profile=user_profile,
             price_max=price_max,
+            dosage_form=dosage_form,
         )
         return self._sort_products(filtered, user_profile=user_profile, intent=intent)
 
@@ -938,6 +950,7 @@ class PlatformApiClient:
         meta_filters: Sequence[str] | None,
         user_profile: UserProfile | None,
         price_max: float | None,
+        dosage_form: str | None = None,
     ) -> List[DataProduct]:
         ui_state = request.ui_state
         region_id = ui_state.selected_region_id if ui_state else None
@@ -948,6 +961,7 @@ class PlatformApiClient:
         lactose_free_pref = preferences.lactose_free is True if preferences else False
         for_children_pref = preferences.for_children is True if preferences else False
         preferred_forms = self._normalize_preferred_forms(preferences)
+        normalized_dosage_form = str(dosage_form).strip().lower() if dosage_form else None
         effective_region = region_id or (preferences.region if preferences else None)
         # TODO: replace client-side region filtering with real geo-aware catalog queries.
 
@@ -966,6 +980,8 @@ class PlatformApiClient:
             if not self._match_meta_filters(product, normalized_filters):
                 continue
             if price_max is not None and product.price is not None and product.price > price_max:
+                continue
+            if normalized_dosage_form and not self._product_form_matches_value(product, normalized_dosage_form):
                 continue
             general_passed.append(product)
             if preferences:
@@ -1092,6 +1108,13 @@ class PlatformApiClient:
             return True
         return self._matches_preferred_form(product, normalized_forms)
 
+    def _product_form_matches_value(self, product: DataProduct, value: str) -> bool:
+        form_hint = self._product_form_hint(product)
+        if form_hint and value in form_hint:
+            return True
+        haystack = f"{product.name} {product.description or ''}".lower()
+        return value in haystack
+
     def _product_form_hint(self, product: DataProduct) -> str | None:
         if product.dosage_form:
             return str(product.dosage_form).strip().lower()
@@ -1185,6 +1208,20 @@ class PlatformApiClient:
             snapshot["note"] = cart["note"]
         if cart.get("subtitle"):
             snapshot["subtitle"] = cart["subtitle"]
+        # Promo code fields
+        if cart.get("promo_error"):
+            snapshot["promo_error"] = cart["promo_error"]
+        if cart.get("applied_promo"):
+            snapshot["applied_promo"] = cart["applied_promo"]
+        if cart.get("discount"):
+            snapshot["discount"] = cart["discount"]
+        if cart.get("total_with_discount"):
+            snapshot["total_with_discount"] = cart["total_with_discount"]
+        # Delivery fields
+        if cart.get("delivery_type"):
+            snapshot["delivery_type"] = cart["delivery_type"]
+        if cart.get("delivery_info"):
+            snapshot["delivery_info"] = cart["delivery_info"]
         return snapshot
 
     def _serialize_order(self, order: Dict[str, Any]) -> Dict[str, Any]:

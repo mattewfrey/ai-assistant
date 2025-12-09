@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Sequence
 
+from langsmith import traceable
+
 from ..config import Settings
 from ..intents import (
     ActionChannel,
@@ -23,6 +25,7 @@ from ..models import (
     UserProfile,
 )
 from .assistant_client import AssistantClient
+from .debug_meta import DebugMetaBuilder
 from .metrics import get_metrics_service
 from .dialog_state_store import DialogStateStore, get_dialog_state_store
 from .platform_client import PlatformApiClient
@@ -247,12 +250,15 @@ class Orchestrator:
         self._user_profile_store = user_profile_store or get_user_profile_store()
         self._dialog_state_store = dialog_state_store or get_dialog_state_store()
 
+    @traceable(run_type="chain", name="orchestrator_build_response")
     async def build_response(
         self,
         *,
         request: ChatRequest,
         assistant_response: AssistantResponse,
         router_matched: bool = False,
+        debug_builder: DebugMetaBuilder | None = None,
+        trace_id: str | None = None,
     ) -> ChatResponse:
         llm_used, llm_backend = self._infer_llm_context(assistant_response)
         return await self._build_chat_response(
@@ -261,8 +267,11 @@ class Orchestrator:
             router_matched=router_matched,
             llm_used=llm_used,
             llm_backend=llm_backend,
+            debug_builder=debug_builder,
+            trace_id=trace_id,
         )
 
+    @traceable(run_type="chain", name="orchestrator_build_response_from_router")
     async def build_response_from_router(
         self,
         *,
@@ -271,11 +280,15 @@ class Orchestrator:
         slot_manager: SlotManager,
         conversation_id: str,
         user_profile: UserProfile | None,
+        debug_builder: DebugMetaBuilder | None = None,
+        trace_id: str | None = None,
     ) -> ChatResponse:
         assistant_response = slot_manager.handle_router_result(
             router_result=router_result,
             conversation_id=conversation_id,
             user_profile=user_profile,
+            debug_builder=debug_builder,
+            trace_id=trace_id,
         )
         metrics = get_metrics_service()
         slot_prompt_pending = False
@@ -291,8 +304,11 @@ class Orchestrator:
             router_matched=True,
             llm_used=False,
             llm_backend="router",
+            debug_builder=debug_builder,
+            trace_id=trace_id,
         )
 
+    @traceable(run_type="chain", name="orchestrator_build_chat_response")
     async def _build_chat_response(
         self,
         *,
@@ -301,12 +317,19 @@ class Orchestrator:
         router_matched: bool,
         llm_used: bool,
         llm_backend: str | None,
+        debug_builder: DebugMetaBuilder | None,
+        trace_id: str | None,
     ) -> ChatResponse:
         conversation_id = request.conversation_id or ""
         platform_data = DataPayload()
         aggregated_products: List[Dict[str, Any]] = []
         product_query_attempted = False
         additional_notes: list[str] = []
+        slot_filling_used = False
+        builder = debug_builder or DebugMetaBuilder(request_id=conversation_id or None)
+        builder.set_router_matched(router_matched)
+        if debug_builder is None:
+            builder.set_llm_used(llm_used)
 
         def _append_orders(new_orders: Sequence[Dict[str, Any]] | None) -> None:
             if not new_orders:
@@ -324,6 +347,7 @@ class Orchestrator:
                 if order_id:
                     existing_ids.add(order_id)
         meta = assistant_response.meta.model_copy() if assistant_response.meta else AssistantMeta()
+        builder.merge_existing(meta.debug)
         confidence = meta.confidence
         threshold = self._settings.assistant_min_confidence
         low_confidence = confidence is not None and confidence < threshold
@@ -334,6 +358,22 @@ class Orchestrator:
 
         actions = list(assistant_response.actions)
         top_intent = actions[0].intent if actions and actions[0].intent else None
+        channel = self._resolve_channel(actions[0]) if actions else None
+        if meta and meta.debug:
+            slot_filling_used = bool(meta.debug.get("slot_filling_used", False))
+            builder.set_slot_filling_used(slot_filling_used)
+            if "slot_prompt_pending" in meta.debug:
+                builder.set_pending_slots(bool(meta.debug.get("slot_prompt_pending")))
+        builder.set_trace_id(trace_id)
+        builder.add_intent(getattr(top_intent, "value", None))
+        log_info(
+            logger,
+            "Building chat response",
+            trace_id=trace_id,
+            user_id=request.user_id,
+            conversation_id=conversation_id,
+            intent=top_intent,
+        )
         top_category = get_intent_category(top_intent)
         symptom_missing_fields: List[str] = []
         if top_category == "symptom" and actions:
@@ -377,6 +417,15 @@ class Orchestrator:
         for action in actions:
             logger.info("Processing action type=%s intent=%s", action.type, action.intent)
             action_channel = self._resolve_channel(action)
+            builder.add_intent(getattr(action.intent, "value", action.intent) if action.intent else None)
+            log_info(
+                logger,
+                "Processing action",
+                trace_id=trace_id,
+                user_id=request.user_id,
+                conversation_id=conversation_id,
+                intent=action.intent,
+            )
             if skip_reason and action.type == ActionType.CALL_PLATFORM_API:
                 logger.info("Skipping platform call due to %s (intent=%s)", skip_reason, action.intent)
                 continue
@@ -605,23 +654,64 @@ class Orchestrator:
             # Для правовых интентов статический ответ имеет приоритет
             reply = Reply(text=platform_data.message, display_hints=reply.display_hints)
 
-        # Сначала beautify_reply для улучшения текста LLM-ом
-        reply = await self._assistant_client.beautify_reply(
-            reply=reply,
-            data=platform_data,
-            constraints={"style": "neutral", "avoid_medical_advice": True},
-            user_message=request.message,
-        )
+        # Сначала beautify_reply для улучшения текста LLM-ом (если включено и LLM доступен)
+        llm_available = bool(self._assistant_client._langchain_client) and bool(self._settings.openai_api_key)
+        if self._settings.enable_beautify_reply and llm_available:
+            try:
+                reply = await self._assistant_client.beautify_reply(
+                    reply=reply,
+                    data=platform_data,
+                    constraints={
+                        "style": "neutral_helpful",
+                        "avoid_medical_advice": True,
+                        "max_length": 600,
+                    },
+                    user_message=request.message,
+                    conversation_id=conversation_id,
+                    user_id=request.user_id,
+                    intent=getattr(top_intent, "value", top_intent) if top_intent else None,
+                    router_matched=router_matched,
+                    slot_filling_used=slot_filling_used,
+                    channel=getattr(channel, "value", channel) if channel else None,
+                    trace_metadata={
+                        "actions": [
+                            getattr(action.intent, "value", action.intent)
+                            for action in actions
+                            if action.intent
+                        ],
+                        "llm_backend": llm_backend,
+                        "llm_used": llm_used,
+                    },
+                    debug_builder=builder,
+                    trace_id=trace_id,
+                )
+            except Exception as exc:  # pragma: no cover - safety net
+                logger.warning("Beautify reply failed, using original. error=%s", exc)
         # SafetyFilter ПОСЛЕ beautify_reply для гарантии безопасности финального ответа
         reply = Reply(text=SafetyFilter.sanitize_reply(reply.text), display_hints=reply.display_hints)
         meta = SafetyFilter.ensure_disclaimer(meta)
         metrics_snapshot = get_metrics_service().snapshot()
-        debug_payload = dict(meta.debug or {})
-        debug_payload.setdefault("llm_used", llm_used)
-        debug_payload.setdefault("llm_backend", llm_backend if llm_used else None)
-        debug_payload["router_matched"] = router_matched
-        debug_payload["metrics_snapshot"] = metrics_snapshot.__dict__
-        meta.debug = debug_payload
+        builder.add_extra("metrics_snapshot", metrics_snapshot.__dict__)
+        builder.set_slot_filling_used(slot_filling_used)
+        builder.set_router_matched(router_matched)
+        if llm_backend:
+            builder.add_extra("llm_backend", llm_backend if llm_used else None)
+
+        # Finalize source if not set explicitly
+        debug_snapshot = builder.build()
+        if not debug_snapshot.get("source"):
+            source = None
+            if debug_snapshot.get("router_matched"):
+                source = "router+slots" if debug_snapshot.get("slot_filling_used") else "router"
+            elif debug_snapshot.get("slot_filling_used"):
+                source = "slots"
+            elif debug_snapshot.get("llm_used"):
+                source = "llm+platform" if platform_data.has_content() else "llm"
+            if source:
+                builder.set_source(source)
+                debug_snapshot["source"] = source
+
+        meta.debug = builder.build()
 
         self._remember_dialog_state(
             conversation_id=conversation_id,

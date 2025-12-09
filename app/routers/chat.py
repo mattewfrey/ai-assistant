@@ -4,15 +4,17 @@ import logging
 import time
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 
 from ..config import Settings, get_settings
 from ..intents import IntentType
 from ..models import ChatRequest, ChatResponse
-from ..models.assistant import AssistantMeta
-from ..services.assistant_client import AssistantClient, AssistantClientError
+from ..services.assistant_client import AssistantClient
 from ..services.conversation_store import get_conversation_store
 from ..services.dialog_state_store import get_dialog_state_store
+from ..services.debug_meta import DebugMetaBuilder
+from ..services.error_handling import BadRequestError, ValidationError
+from ..services.logging_utils import log_info
 from ..services.metrics import get_metrics_service
 from ..services.orchestrator import Orchestrator
 from ..services.platform_client import PlatformApiClient
@@ -68,10 +70,26 @@ async def post_message(
     metrics = get_metrics_service()
     
     if not request.message.strip():
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="message must not be empty")
+        raise ValidationError(
+            "message must not be empty",
+            reason="empty_message",
+            http_status=status.HTTP_400_BAD_REQUEST,
+        )
 
     conversation_id = request.conversation_id or str(uuid4())
+    trace_id = uuid4().hex if settings.enable_request_tracing else None
+    debug_builder = DebugMetaBuilder(request_id=conversation_id)
+    debug_builder.set_trace_id(trace_id)
     normalized_request = request.model_copy(update={"conversation_id": conversation_id})
+
+    log_info(
+        logger,
+        'Incoming chat message',
+        trace_id=trace_id,
+        user_id=normalized_request.user_id,
+        conversation_id=conversation_id,
+        intent=None,
+    )
 
     user_profile = user_profile_store.get_or_create(normalized_request.user_id) if normalized_request.user_id else None
     dialog_state_store = get_dialog_state_store()
@@ -82,6 +100,8 @@ async def post_message(
         request_message=normalized_request.message,
         conversation_id=conversation_id,
         user_profile=user_profile,
+        debug_builder=debug_builder,
+        trace_id=trace_id,
     )
     if followup_decision.handled and followup_decision.assistant_response:
         if followup_decision.assistant_response.actions:
@@ -92,11 +112,8 @@ async def post_message(
             request=normalized_request,
             assistant_response=followup_decision.assistant_response,
             router_matched=True,
-        )
-        _attach_debug_metadata(
-            chat_response,
-            router_matched=True,
-            slot_filling_used=followup_decision.slot_filling_used,
+            debug_builder=debug_builder,
+            trace_id=trace_id,
         )
         _record_history(conversation_id, normalized_request.message, chat_response.reply.text)
         _record_latency(start_time)
@@ -106,6 +123,8 @@ async def post_message(
         request=normalized_request,
         user_profile=user_profile,
         dialog_state=dialog_state,
+        debug_builder=debug_builder,
+        trace_id=trace_id,
     )
     if router_result.matched:
         metrics.record_router_match(True)
@@ -115,11 +134,8 @@ async def post_message(
             slot_manager=slot_manager,
             conversation_id=conversation_id,
             user_profile=user_profile,
-        )
-        _attach_debug_metadata(
-            chat_response,
-            router_matched=True,
-            slot_filling_used=bool(router_result.missing_slots),
+            debug_builder=debug_builder,
+            trace_id=trace_id,
         )
         _record_history(conversation_id, normalized_request.message, chat_response.reply.text)
         _record_latency(start_time)
@@ -138,17 +154,16 @@ async def post_message(
             normalized_request.user_id,
             conversation_id,
         )
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Превышен лимит запросов. Пожалуйста, подождите немного.",
+        raise BadRequestError(
+            "Превышен лимит запросов. Пожалуйста, подождите немного.",
+            reason="rate_limit_exceeded",
+            http_status=status.HTTP_429_TOO_MANY_REQUESTS,
         )
 
     intents = [intent.value for intent in IntentType]
-    try:
-        assistant_response = await assistant_client.analyze_message(normalized_request, intents)
-    except AssistantClientError as exc:
-        logger.exception("Assistant error")
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    assistant_response = await assistant_client.analyze_message(
+        normalized_request, intents, debug_builder=debug_builder, trace_id=trace_id
+    )
 
     action_log_payload = [
         {
@@ -163,11 +178,8 @@ async def post_message(
     chat_response = await orchestrator.build_response(
         request=normalized_request,
         assistant_response=assistant_response,
-    )
-    _attach_debug_metadata(
-        chat_response,
-        router_matched=False,
-        slot_filling_used=False,
+        debug_builder=debug_builder,
+        trace_id=trace_id,
     )
     _record_latency(start_time)
     return chat_response
@@ -184,24 +196,3 @@ def _record_latency(start_time: float) -> None:
     """Record response latency in milliseconds."""
     latency_ms = (time.perf_counter() - start_time) * 1000
     get_metrics_service().record_response_latency(latency_ms)
-
-
-def _attach_debug_metadata(
-    chat_response: ChatResponse,
-    *,
-    router_matched: bool,
-    slot_filling_used: bool,
-) -> None:
-    metrics_snapshot = get_metrics_service().snapshot().__dict__
-    meta = chat_response.meta or AssistantMeta()
-    debug_payload = dict(meta.debug or {})
-    debug_payload["router_matched"] = router_matched
-    existing_slot_flag = bool(debug_payload.get("slot_filling_used"))
-    debug_payload["slot_filling_used"] = existing_slot_flag or slot_filling_used
-    debug_payload.setdefault("llm_used", False)
-    debug_payload.setdefault("llm_cached", False)
-    if "llm_backend" not in debug_payload:
-        debug_payload["llm_backend"] = "langchain" if debug_payload["llm_used"] else None
-    debug_payload["metrics_snapshot"] = metrics_snapshot
-    meta.debug = debug_payload
-    chat_response.meta = meta

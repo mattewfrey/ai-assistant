@@ -1,5 +1,44 @@
 from __future__ import annotations
 
+from app.intents import ActionType, IntentType
+from app.models import UserProfile, UserPreferences
+from app.services.dialog_state_store import get_dialog_state_store
+from app.services.slot_manager import SlotManager
+
+
+def test_slot_manager_followup_fills_age_and_returns_action():
+    conversation_id = "conv-slot"
+    dialog_store = get_dialog_state_store()
+    dialog_store.upsert_state(
+        conversation_id,
+        current_intent=IntentType.FIND_BY_SYMPTOM,
+        channel=None,
+        slots={"symptom": "голова болит"},
+        pending_slots=["age"],
+        slot_questions={"age": "Уточните возраст"},
+    )
+    manager = SlotManager(dialog_state_store=dialog_store)
+    profile = UserProfile(user_id="u1", preferences=UserPreferences())
+
+    result = manager.try_handle_followup(
+        request_message="Мне 30",
+        conversation_id=conversation_id,
+        user_profile=profile,
+        debug_builder=None,
+    )
+
+    assert result.handled is True
+    assert result.slot_filling_used is True
+    response = result.assistant_response
+    assert response is not None
+    assert response.actions
+    action = response.actions[0]
+    assert action.type == ActionType.CALL_PLATFORM_API
+    assert action.parameters.get("age") == 30
+    assert response.meta and response.meta.debug
+    assert response.meta.debug.get("slot_filling_used") is True
+from __future__ import annotations
+
 from app.intents import IntentType
 from app.models import UserPreferences, UserProfile
 from app.models.assistant import AssistantResponse

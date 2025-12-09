@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from langsmith import traceable
 import yaml
 
 from ..intents import ActionChannel, IntentType
@@ -70,12 +71,15 @@ class RouterService:
         self._price_regex = re.compile(r"(?:до|максимум|не дороже)\s*(?P<price>\d{2,5})", re.IGNORECASE)
         self._age_regex = re.compile(r"\b(?P<age>\d{1,2})\b")
 
+    @traceable(run_type="chain", name="router_match")
     def match(
         self,
         *,
         request: ChatRequest,
         user_profile: UserProfile | None,
         dialog_state: DialogState | None,
+        debug_builder: Any | None = None,
+        trace_id: str | None = None,
     ) -> RouterResult:
         message = (request.message or "").strip()
         if not message:
@@ -92,10 +96,30 @@ class RouterService:
                 user_profile=user_profile,
                 dialog_state=dialog_state,
             )
+            if debug_builder:
+                debug_builder.set_router_matched(True).add_intent(result.intent.value if result.intent else None)
+            logger.info(
+                "trace_id=%s user_id=%s intent=%s Router matched rule slots=%s",
+                trace_id or "-",
+                getattr(request, "user_id", None) or "-",
+                getattr(result.intent, "value", result.intent) if result.intent else "-",
+                list(result.slots.keys()),
+            )
             return result
 
         product_result = self._detect_product_query(message, normalized, user_profile, dialog_state)
         if product_result:
+            if debug_builder:
+                debug_builder.set_router_matched(True).add_intent(
+                    product_result.intent.value if product_result.intent else None
+                )
+            logger.info(
+                "trace_id=%s user_id=%s intent=%s Router product shortcut slots=%s",
+                trace_id or "-",
+                getattr(request, "user_id", None) or "-",
+                getattr(product_result.intent, "value", product_result.intent) if product_result.intent else "-",
+                list(product_result.slots.keys()),
+            )
             return product_result
 
         return RouterResult(matched=False, router_matched=False)
@@ -188,14 +212,11 @@ class RouterService:
         if user_profile:
             prefs = user_profile.preferences
             slots.setdefault("age", getattr(prefs, "age", None))
-            slots.setdefault("price_max", getattr(prefs, "default_max_price", None) or getattr(prefs, "price_ceiling", None))
-            preferred_forms = getattr(prefs, "preferred_dosage_forms", None) or getattr(prefs, "preferred_forms", None)
+            slots.setdefault("price_max", getattr(prefs, "default_max_price", None))
+            preferred_forms = getattr(prefs, "preferred_dosage_forms", None)
             if preferred_forms:
                 slots.setdefault("preferred_dosage_forms", preferred_forms)
                 slots.setdefault("dosage_form", preferred_forms[0])
-            preferred_brands = getattr(prefs, "preferred_brands", None)
-            if preferred_brands:
-                slots.setdefault("preferred_brands", preferred_brands)
 
         if dialog_state and dialog_state.slots:
             slots = {**dialog_state.slots, **{k: v for k, v in slots.items() if v is not None}}

@@ -11,7 +11,7 @@ def build_beautify_prompt() -> ChatPromptTemplate:
         "You receive structured data (orders, cart, products, user profile) and a baseline reply. "
         "Your task is to rewrite the reply so it sounds natural, friendly, and compliant with medical safety: "
         "never prescribe medications or dosages, encourage reading official instructions, and suggest consulting "
-        "a doctor for medical advice. "
+        "a doctor for medical advice. Do not invent or change facts; only rephrase the provided content. "
         'Return ONLY JSON with shape {{"text": string, "tone": optional string, "title": optional string}}. '
         "Do not add markdown headings; keep it concise."
     )
@@ -22,6 +22,7 @@ def build_beautify_prompt() -> ChatPromptTemplate:
         "Структурированные данные: {data_json}\n"
         "Ограничения/предпочтения: {constraints_json}\n"
         "Сформируй понятный текст на русском языке, упомяни ключевые факты из данных и добавь дружелюбный тон. "
+        "Не придумывай новых фактов, не меняй смысл, лишь переформулируй. "
         "Всегда напоминай проверять инструкцию, если речь о лекарствах."
     )
 

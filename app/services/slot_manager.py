@@ -5,11 +5,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from langsmith import traceable
 import yaml
 
 from ..intents import ActionChannel, ActionType, IntentType
 from ..models.assistant import AssistantAction, AssistantMeta, AssistantResponse, Reply
 from .dialog_state_store import DialogStateStore, get_dialog_state_store
+from .debug_meta import DebugMetaBuilder
 from .router import CONFIG_PATH, RouterResult
 from .user_profile_store import UserProfile, UserProfileStore, get_user_profile_store
 
@@ -40,12 +42,15 @@ class SlotManager:
         self._age_regex = re.compile(r"\b(?P<age>\d{1,2})\b")
         self._price_regex = re.compile(r"(?:до|максимум)\s*(?P<price>\d{2,5})", re.IGNORECASE)
 
+    @traceable(run_type="chain", name="slot_manager_followup")
     def try_handle_followup(
         self,
         *,
         request_message: str,
         conversation_id: str,
         user_profile: UserProfile | None,
+        debug_builder: DebugMetaBuilder | None = None,
+        trace_id: str | None = None,
     ) -> SlotHandlingResult:
         state = self._dialog_state_store.get_state(conversation_id)
         if not state or not state.pending_slots:
@@ -75,6 +80,17 @@ class SlotManager:
                 ),
             )
             response.meta.debug = (response.meta.debug or {}) | {"slot_filling_used": True}
+            if debug_builder:
+                debug_builder.set_slot_filling_used(True).set_pending_slots(True).add_intent(
+                    getattr(state.current_intent, "value", None)
+                )
+            logger.info(
+                "trace_id=%s user_id=%s intent=%s slot_followup pending=%s",
+                trace_id or "-",
+                getattr(user_profile, "user_id", None) or "-",
+                getattr(state.current_intent, "value", state.current_intent) if state.current_intent else "-",
+                state.pending_slots,
+            )
             return SlotHandlingResult(
                 handled=True,
                 assistant_response=response,
@@ -91,12 +107,15 @@ class SlotManager:
         )
         return SlotHandlingResult(handled=True, assistant_response=action_response, slot_filling_used=True)
 
+    @traceable(run_type="chain", name="slot_manager_handle_router_result")
     def handle_router_result(
         self,
         *,
         router_result: RouterResult,
         conversation_id: str,
         user_profile: UserProfile | None = None,
+        debug_builder: DebugMetaBuilder | None = None,
+        trace_id: str | None = None,
     ) -> AssistantResponse:
         slots = self._apply_profile_defaults(dict(router_result.slots), user_profile)
         slot_questions = router_result.slot_questions or self._intent_slot_questions.get(router_result.intent, {})
@@ -115,6 +134,10 @@ class SlotManager:
                 slot_questions=slot_questions,
                 last_prompt=prompt,
             )
+            if debug_builder:
+                debug_builder.set_slot_filling_used(True).set_pending_slots(True).add_intent(
+                    getattr(router_result.intent, "value", None)
+                )
             return AssistantResponse(
                 reply=Reply(text=prompt),
                 actions=[],
@@ -125,6 +148,18 @@ class SlotManager:
                 ),
             )
         self._dialog_state_store.clear_state(conversation_id)
+        if debug_builder:
+            debug_builder.set_slot_filling_used(False).set_pending_slots(False).add_intent(
+                getattr(router_result.intent, "value", None)
+            )
+        logger.info(
+            "trace_id=%s user_id=%s intent=%s slot_handle slots=%s pending=%s",
+            trace_id or "-",
+            getattr(user_profile, "user_id", None) or "-",
+            getattr(router_result.intent, "value", router_result.intent) if router_result.intent else "-",
+            list(slots.keys()),
+            pending_slots,
+        )
         return self._build_action_response(
             intent=router_result.intent,
             channel=router_result.channel,
@@ -161,7 +196,7 @@ class SlotManager:
             if user_profile:
                 self._user_profile_store.update_preferences(user_profile.user_id, age=age)
         price = self._extract_price(message)
-        if price is not None:
+        if price is not None and price > 0:
             slots["price_max"] = price
             if user_profile:
                 self._user_profile_store.update_preferences(user_profile.user_id, default_max_price=price)
@@ -169,7 +204,14 @@ class SlotManager:
         if form is not None:
             slots["dosage_form"] = form
             if user_profile:
-                self._user_profile_store.update_preferences(user_profile.user_id, preferred_dosage_forms=[form])
+                existing = user_profile.preferences.preferred_dosage_forms or []
+                updated_forms = list(existing)
+                if form not in updated_forms:
+                    updated_forms.append(form)
+                self._user_profile_store.update_preferences(
+                    user_profile.user_id,
+                    preferred_dosage_forms=updated_forms,
+                )
         return slots
 
     def _apply_profile_defaults(self, slots: Dict[str, Any], user_profile: UserProfile | None) -> Dict[str, Any]:
@@ -179,11 +221,9 @@ class SlotManager:
         if not slots.get("age") and getattr(prefs, "age", None):
             slots["age"] = prefs.age
         default_price = getattr(prefs, "default_max_price", None)
-        if default_price is None:
-            default_price = getattr(prefs, "price_ceiling", None)
         if not slots.get("price_max") and default_price is not None:
             slots["price_max"] = default_price
-        preferred_forms = getattr(prefs, "preferred_dosage_forms", None) or getattr(prefs, "preferred_forms", None)
+        preferred_forms = getattr(prefs, "preferred_dosage_forms", None) or []
         if not slots.get("dosage_form") and preferred_forms:
             slots["dosage_form"] = preferred_forms[0]
         return slots

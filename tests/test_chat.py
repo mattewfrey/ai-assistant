@@ -41,7 +41,7 @@ class FakeAssistantClient(AssistantClient):
     async def explain_data(self, original_reply, data, user_message):  # type: ignore[override]
         return None
 
-    async def beautify_reply(self, *, reply, data, constraints=None, user_message=None):  # type: ignore[override]
+    async def beautify_reply(self, *, reply, data, constraints=None, user_message=None, **kwargs):  # type: ignore[override]
         return reply
 
 

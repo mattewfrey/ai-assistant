@@ -32,8 +32,17 @@ class Settings(BaseSettings):
     enable_data_explanations: bool = Field(default=False, alias="ENABLE_DATA_EXPLANATIONS")
     use_langchain: bool = Field(default=False, alias="USE_LANGCHAIN")
     langchain_tracing: bool = Field(default=False, alias="LANGCHAIN_TRACING")
+    langchain_cache: bool = Field(default=False, alias="LANGCHAIN_CACHE")
 
     assistant_system_prompt_version: str = Field(default="v1")
+
+    # LangSmith / LangChain tracing
+    langsmith_api_key: str | None = Field(default=None, alias="LANGSMITH_API_KEY")
+    langsmith_endpoint: str | None = Field(default=None, alias="LANGSMITH_ENDPOINT")
+    langsmith_project: str | None = Field(default=None, alias="LANGSMITH_PROJECT")
+    langsmith_tracing_v2: bool = Field(default=False, alias="LANGCHAIN_TRACING_V2")
+    enable_beautify_reply: bool = Field(default=True, alias="ENABLE_BEAUTIFY_REPLY")
+    enable_request_tracing: bool = Field(default=True, alias="ENABLE_REQUEST_TRACING")
 
     # Rate limiting settings
     llm_rate_limit_window_seconds: int = Field(default=60, alias="LLM_RATE_LIMIT_WINDOW")
