@@ -64,3 +64,5 @@ Thumbs.db
 *.db
 *.sqlite3
 
+.env
+запуск

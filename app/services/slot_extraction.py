@@ -275,10 +275,18 @@ DEFAULT_DOSAGE_FORM_KEYWORDS: Dict[str, List[str]] = {
 # Маркеры для детских препаратов
 CHILDREN_MARKERS = [
     "для ребенка", "для ребёнка", "ребенку", "ребёнку",
+    "ребенок", "ребёнок",  # Одиночные слова
     "для детей", "детям", "детский", "детское", "детская",
     "малышу", "малыша", "для малыша", "для малышей",
+    "малыш",  # Одиночное слово
     "сыну", "дочке", "дочери", "внуку", "внучке",
     "грудничку", "грудничок", "новорожденному", "младенцу",
+]
+
+# Маркеры для подростков
+TEENAGER_MARKERS = [
+    "подростку", "подростка", "для подростка", "подросток",
+    "тинейджер", "школьнику", "школьника", "для школьника",
 ]
 
 # Маркеры для взрослых
@@ -286,6 +294,30 @@ ADULT_MARKERS = [
     "для взрослого", "взрослому", "взрослый",
     "мне", "себе",
 ]
+
+# Маркеры для пожилых
+ELDERLY_MARKERS = [
+    "пожилому", "пожилого", "для пожилого", "пожилой",
+    "бабушке", "бабушки", "для бабушки",
+    "дедушке", "дедушки", "для дедушки",
+    "престарелому", "престарелого",
+    "старику", "старика", "старушке",
+]
+
+# Возрастные группы (enum-like)
+class AgeGroup:
+    CHILD = "child"       # 0-12 лет
+    TEENAGER = "teenager" # 13-17 лет
+    ADULT = "adult"       # 18-59 лет
+    ELDERLY = "elderly"   # 60+ лет
+
+# Диапазоны возраста для каждой группы
+AGE_GROUP_RANGES = {
+    AgeGroup.CHILD: (0, 12),
+    AgeGroup.TEENAGER: (13, 17),
+    AgeGroup.ADULT: (18, 59),
+    AgeGroup.ELDERLY: (60, 120),
+}
 
 # Специальные фильтры
 SPECIAL_FILTERS: Dict[str, List[str]] = {
@@ -302,9 +334,79 @@ SPECIAL_FILTERS: Dict[str, List[str]] = {
 # Маркеры беременности/лактации
 PREGNANCY_MARKERS = [
     "беременн", "при беременности", "беременным",
-    "кормящ", "при лактации", "кормлю грудью", "грудное вскармливание",
-    "в положении",
+    "в положении", "жду ребенка", "жду ребёнка",
 ]
+
+BREASTFEEDING_MARKERS = [
+    "кормящ", "при лактации", "кормлю грудью", "грудное вскармливание",
+    "гв", "на гв", "кормящей маме",
+]
+
+# Статусы беременности для slot
+class PregnancyStatus:
+    PREGNANT = "pregnant"
+    BREASTFEEDING = "breastfeeding"
+    NONE = "none"
+
+# Маркеры хронических заболеваний
+CHRONIC_CONDITIONS_MARKERS: Dict[str, List[str]] = {
+    "diabetes": ["диабет", "диабетик", "сахарный диабет", "инсулин"],
+    "hypertension": ["гипертон", "давление высокое", "гипертензи", "повышенное давление"],
+    "asthma": ["астм", "бронхиальная астма"],
+    "heart_disease": [
+        "сердечн", "сердц", "аритми", "стенокарди", "инфаркт",
+        "проблемы с сердцем", "больное сердце",
+    ],
+    "kidney_disease": [
+        "почки", "почечн", "нефрит", "пиелонефрит",
+        "проблемы с почками", "больные почки",
+    ],
+    "liver_disease": ["печен", "гепатит", "цирроз", "проблемы с печенью"],
+    "stomach_ulcer": ["язва желудка", "язвенн", "гастрит", "проблемы с жкт", "проблемы с желудком"],
+    "glaucoma": ["глауком"],
+    "thyroid": ["щитовид", "тиреоидит", "гипотиреоз", "гипертиреоз"],
+}
+
+# Маркеры аллергий на лекарства
+ALLERGY_MARKERS = [
+    "аллергия на", "аллергик", "непереносимость",
+    "реакция на", "не переношу", "нельзя принимать",
+]
+
+# Маркеры отсутствия аллергий/противопоказаний
+NO_ALLERGY_MARKERS = [
+    "аллергии нет", "нет аллергии", "не аллергик",
+    "без аллергии", "аллергий нет",
+]
+
+NO_CHRONIC_MARKERS = [
+    "нет хронических", "хронических нет", "ничем не болею",
+    "здоров", "противопоказаний нет", "нет противопоказаний",
+]
+
+NO_PREGNANCY_MARKERS = [
+    "не беременна", "не кормлю", "не беременность",
+    "ни то, ни другое", "ни то ни другое",
+]
+
+# Длительность симптомов
+SYMPTOM_DURATION_MARKERS: Dict[str, List[str]] = {
+    "today": ["сегодня", "только что", "час назад", "с утра", "недавно"],
+    "few_days": ["пару дней", "несколько дней", "2 дня", "3 дня", "два дня", "три дня", "вчера"],
+    "week": ["неделю", "неделя", "7 дней", "семь дней", "дней 5", "пять дней"],
+    "long": ["давно", "долго", "больше недели", "две недели", "месяц", "хронически"],
+}
+
+# Выраженность симптомов (порядок важен - сначала проверяем severe, потом mild)
+SYMPTOM_SEVERITY_MARKERS: Dict[str, List[str]] = {
+    # severe проверяется первым, чтобы "нестерпимо" не совпало с "терпимо"
+    "severe": [
+        "сильно", "очень сильн", "невыносим", "ужасно", "адская", "адский",
+        "резко", "острая", "острый", "нестерпим", "невозможн", "дикая", "дикий",
+    ],
+    "moderate": ["умеренн", "средн", "ощутим", "заметн"],
+    "mild": ["слабо", "немного", "чуть-чуть", "слегка", "несильно", "терпимо"],
+}
 
 # Маркеры OTC (без рецепта)
 OTC_MARKERS = [
@@ -370,8 +472,11 @@ class ExtractionResult:
     
     # Возраст
     age: Optional[int] = None
+    age_group: Optional[str] = None  # child, teenager, adult, elderly
     is_for_children: bool = False
     is_for_adults: bool = False
+    is_for_elderly: bool = False
+    is_for_teenager: bool = False
     
     # Цена
     price_min: Optional[int] = None
@@ -383,6 +488,8 @@ class ExtractionResult:
     symptoms: List[str] = field(default_factory=list)
     disease: Optional[str] = None
     diseases: List[str] = field(default_factory=list)
+    symptom_duration: Optional[str] = None  # today, few_days, week, long
+    symptom_severity: Optional[str] = None  # mild, moderate, severe
     
     # Форма выпуска
     dosage_form: Optional[str] = None
@@ -394,6 +501,18 @@ class ExtractionResult:
     # Беременность/лактация
     is_pregnant: bool = False
     is_breastfeeding: bool = False
+    pregnancy_status: Optional[str] = None  # pregnant, breastfeeding, none
+    
+    # Хронические заболевания и противопоказания
+    chronic_conditions: List[str] = field(default_factory=list)
+    has_chronic_conditions: Optional[bool] = None  # True/False/None=не спрашивали
+    
+    # Аллергии
+    has_allergies: Optional[bool] = None  # True/False/None=не спрашивали
+    allergies: List[str] = field(default_factory=list)
+    
+    # Текущие лекарства
+    current_medications: List[str] = field(default_factory=list)
     
     # Рецептурность
     is_otc: Optional[bool] = None  # True = без рецепта, False = рецептурный, None = не указано
@@ -406,13 +525,21 @@ class ExtractionResult:
         """Конвертирует результат в словарь слотов."""
         slots: Dict[str, Any] = {}
         
+        # Возраст
         if self.age is not None:
             slots["age"] = self.age
+        if self.age_group is not None:
+            slots["age_group"] = self.age_group
         if self.is_for_children:
             slots["is_for_children"] = True
         if self.is_for_adults:
             slots["is_for_adults"] = True
+        if self.is_for_elderly:
+            slots["is_for_elderly"] = True
+        if self.is_for_teenager:
+            slots["is_for_teenager"] = True
             
+        # Цена
         if self.price_min is not None:
             slots["price_min"] = self.price_min
         if self.price_max is not None:
@@ -420,6 +547,7 @@ class ExtractionResult:
         if self.price_filter_disabled:
             slots["price_filter_disabled"] = True
             
+        # Симптомы и болезни
         if self.symptom:
             slots["symptom"] = self.symptom
         if self.symptoms:
@@ -428,21 +556,47 @@ class ExtractionResult:
             slots["disease"] = self.disease
         if self.diseases:
             slots["diseases"] = self.diseases
+        if self.symptom_duration:
+            slots["symptom_duration"] = self.symptom_duration
+        if self.symptom_severity:
+            slots["symptom_severity"] = self.symptom_severity
             
+        # Форма выпуска
         if self.dosage_form:
             slots["dosage_form"] = self.dosage_form
         if self.dosage_forms:
             slots["dosage_forms"] = self.dosage_forms
             
+        # Специальные фильтры
         for filter_name, value in self.special_filters.items():
             if value:
                 slots[filter_name] = True
                 
+        # Беременность/лактация
         if self.is_pregnant:
             slots["is_pregnant"] = True
         if self.is_breastfeeding:
             slots["is_breastfeeding"] = True
+        if self.pregnancy_status:
+            slots["pregnancy_status"] = self.pregnancy_status
             
+        # Хронические заболевания
+        if self.chronic_conditions:
+            slots["chronic_conditions"] = self.chronic_conditions
+        if self.has_chronic_conditions is not None:
+            slots["has_chronic_conditions"] = self.has_chronic_conditions
+            
+        # Аллергии
+        if self.has_allergies is not None:
+            slots["has_allergies"] = self.has_allergies
+        if self.allergies:
+            slots["allergies"] = self.allergies
+            
+        # Текущие лекарства
+        if self.current_medications:
+            slots["current_medications"] = self.current_medications
+            
+        # Рецептурность
         if self.is_otc is not None:
             slots["is_otc"] = self.is_otc
             
@@ -759,6 +913,111 @@ def extract_is_for_adults(message: str) -> bool:
     return any(marker in normalized for marker in ADULT_MARKERS)
 
 
+def extract_is_for_teenager(message: str) -> bool:
+    """
+    Определяет, запрашивается ли препарат для подростка.
+    """
+    normalized = normalize_text(message)
+    return any(marker in normalized for marker in TEENAGER_MARKERS)
+
+
+def extract_is_for_elderly(message: str) -> bool:
+    """
+    Определяет, запрашивается ли препарат для пожилого человека.
+    """
+    normalized = normalize_text(message)
+    return any(marker in normalized for marker in ELDERLY_MARKERS)
+
+
+def age_to_age_group(age: int) -> Optional[str]:
+    """
+    Преобразует числовой возраст в возрастную группу.
+    
+    Args:
+        age: Возраст в годах
+        
+    Returns:
+        Возрастная группа (child, teenager, adult, elderly) или None
+    """
+    if age < 0:
+        return None
+    if age <= 12:
+        return AgeGroup.CHILD
+    if age <= 17:
+        return AgeGroup.TEENAGER
+    if age <= 59:
+        return AgeGroup.ADULT
+    return AgeGroup.ELDERLY
+
+
+def extract_age_group(message: str) -> Optional[str]:
+    """
+    Извлекает возрастную группу из сообщения.
+    
+    Приоритеты:
+    1. Явное указание возрастной группы (ребёнок, взрослый и т.д.)
+    2. Числовой возраст -> преобразование в группу
+    
+    Returns:
+        Одно из значений: child, teenager, adult, elderly или None
+    """
+    normalized = normalize_text(message)
+    
+    # Сначала проверяем явные маркеры возрастных групп
+    if any(marker in normalized for marker in CHILDREN_MARKERS):
+        return AgeGroup.CHILD
+    
+    if any(marker in normalized for marker in TEENAGER_MARKERS):
+        return AgeGroup.TEENAGER
+    
+    if any(marker in normalized for marker in ELDERLY_MARKERS):
+        return AgeGroup.ELDERLY
+    
+    if any(marker in normalized for marker in ADULT_MARKERS):
+        return AgeGroup.ADULT
+    
+    # Пытаемся извлечь возраст и преобразовать в группу
+    age = extract_age(message)
+    if age is not None:
+        return age_to_age_group(age)
+    
+    return None
+
+
+def extract_age_group_verbose(message: str) -> Tuple[Optional[str], Optional[int], str]:
+    """
+    Расширенное извлечение возрастной группы с метаданными.
+    
+    Returns:
+        (age_group, age, source) - группа, возраст (если есть), источник определения
+    """
+    normalized = normalize_text(message)
+    
+    # Явные маркеры
+    if any(marker in normalized for marker in CHILDREN_MARKERS):
+        age = extract_age(message)
+        return (AgeGroup.CHILD, age, "explicit_marker")
+    
+    if any(marker in normalized for marker in TEENAGER_MARKERS):
+        age = extract_age(message)
+        return (AgeGroup.TEENAGER, age, "explicit_marker")
+    
+    if any(marker in normalized for marker in ELDERLY_MARKERS):
+        age = extract_age(message)
+        return (AgeGroup.ELDERLY, age, "explicit_marker")
+    
+    if any(marker in normalized for marker in ADULT_MARKERS):
+        age = extract_age(message)
+        return (AgeGroup.ADULT, age, "explicit_marker")
+    
+    # Числовой возраст
+    age = extract_age(message)
+    if age is not None:
+        return (age_to_age_group(age), age, "inferred_from_age")
+    
+    return (None, None, "not_found")
+
+
 def extract_special_filters(message: str) -> Dict[str, bool]:
     """
     Извлекает специальные фильтры (без сахара, без лактозы и т.д.)
@@ -800,6 +1059,131 @@ def extract_otc_preference(message: str) -> Optional[bool]:
         return True
     if any(marker in normalized for marker in PRESCRIPTION_MARKERS):
         return False
+    
+    return None
+
+
+def extract_pregnancy_status(message: str) -> Optional[str]:
+    """
+    Извлекает статус беременности/лактации.
+    
+    Returns:
+        'pregnant', 'breastfeeding', 'none' или None если не указано
+    """
+    normalized = normalize_text(message)
+    
+    # Проверяем отрицание
+    if any(marker in normalized for marker in NO_PREGNANCY_MARKERS):
+        return PregnancyStatus.NONE
+    
+    # Проверяем беременность
+    if any(marker in normalized for marker in PREGNANCY_MARKERS):
+        return PregnancyStatus.PREGNANT
+    
+    # Проверяем кормление грудью
+    if any(marker in normalized for marker in BREASTFEEDING_MARKERS):
+        return PregnancyStatus.BREASTFEEDING
+    
+    return None
+
+
+def extract_chronic_conditions(message: str) -> Tuple[Optional[bool], List[str]]:
+    """
+    Извлекает хронические заболевания из сообщения.
+    
+    Returns:
+        (has_conditions, list_of_conditions)
+        has_conditions: True если есть, False если явно указано что нет, None если не указано
+    """
+    normalized = normalize_text(message)
+    conditions: List[str] = []
+    
+    # Проверяем отрицание
+    if any(marker in normalized for marker in NO_CHRONIC_MARKERS):
+        return (False, [])
+    
+    # Ищем конкретные заболевания
+    for condition, markers in CHRONIC_CONDITIONS_MARKERS.items():
+        if any(marker in normalized for marker in markers):
+            conditions.append(condition)
+    
+    if conditions:
+        return (True, conditions)
+    
+    return (None, [])
+
+
+def extract_allergies(message: str) -> Tuple[Optional[bool], List[str]]:
+    """
+    Извлекает информацию об аллергиях.
+    
+    Returns:
+        (has_allergies, list_of_allergens)
+    """
+    normalized = normalize_text(message)
+    allergens: List[str] = []
+    
+    # Проверяем отрицание
+    if any(marker in normalized for marker in NO_ALLERGY_MARKERS):
+        return (False, [])
+    
+    # Проверяем наличие аллергии
+    has_allergy_marker = any(marker in normalized for marker in ALLERGY_MARKERS)
+    
+    if has_allergy_marker:
+        # Пытаемся извлечь на что именно аллергия
+        # Паттерн: "аллергия на <что-то>"
+        import re
+        patterns = [
+            r"аллергия на ([а-яё\s]+)",
+            r"непереносимость ([а-яё\s]+)",
+            r"реакция на ([а-яё\s]+)",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, normalized)
+            if match:
+                allergen = match.group(1).strip()
+                if allergen and len(allergen) > 2:
+                    allergens.append(allergen)
+        
+        return (True, allergens)
+    
+    return (None, [])
+
+
+def extract_symptom_duration(message: str) -> Optional[str]:
+    """
+    Извлекает длительность симптомов.
+    
+    Returns:
+        'today', 'few_days', 'week', 'long' или None
+    """
+    normalized = normalize_text(message)
+    
+    for duration, markers in SYMPTOM_DURATION_MARKERS.items():
+        if any(marker in normalized for marker in markers):
+            return duration
+    
+    return None
+
+
+def extract_symptom_severity(message: str) -> Optional[str]:
+    """
+    Извлекает выраженность симптомов.
+    
+    Returns:
+        'mild', 'moderate', 'severe' или None
+    """
+    normalized = normalize_text(message)
+    
+    # Проверяем в порядке приоритета: severe -> moderate -> mild
+    # Это важно, чтобы "нестерпимо" не совпало с "терпимо"
+    priority_order = ["severe", "moderate", "mild"]
+    
+    for severity in priority_order:
+        markers = SYMPTOM_SEVERITY_MARKERS.get(severity, [])
+        if any(marker in normalized for marker in markers):
+            return severity
     
     return None
 
@@ -870,14 +1254,37 @@ def extract_all_entities(
         result.age = age
         matched_patterns.append("age")
     
-    # Детский/взрослый контекст
+    # Возрастная группа (из явных маркеров или из возраста)
+    age_group = extract_age_group(message)
+    if age_group is not None:
+        result.age_group = age_group
+        matched_patterns.append("age_group")
+    
+    # Детский/взрослый/подросток/пожилой контекст
     result.is_for_children = extract_is_for_children(message)
     if result.is_for_children:
         matched_patterns.append("children_marker")
+        # Если нет age_group, но есть детский маркер - устанавливаем
+        if result.age_group is None:
+            result.age_group = AgeGroup.CHILD
+    
+    result.is_for_teenager = extract_is_for_teenager(message)
+    if result.is_for_teenager:
+        matched_patterns.append("teenager_marker")
+        if result.age_group is None:
+            result.age_group = AgeGroup.TEENAGER
     
     result.is_for_adults = extract_is_for_adults(message)
     if result.is_for_adults:
         matched_patterns.append("adult_marker")
+        if result.age_group is None:
+            result.age_group = AgeGroup.ADULT
+    
+    result.is_for_elderly = extract_is_for_elderly(message)
+    if result.is_for_elderly:
+        matched_patterns.append("elderly_marker")
+        if result.age_group is None:
+            result.age_group = AgeGroup.ELDERLY
     
     # Цена
     price_min = extract_price_min(message)
@@ -909,6 +1316,17 @@ def extract_all_entities(
         result.diseases = diseases
         matched_patterns.append("disease")
     
+    # Длительность и выраженность симптомов
+    symptom_duration = extract_symptom_duration(message)
+    if symptom_duration:
+        result.symptom_duration = symptom_duration
+        matched_patterns.append("symptom_duration")
+    
+    symptom_severity = extract_symptom_severity(message)
+    if symptom_severity:
+        result.symptom_severity = symptom_severity
+        matched_patterns.append("symptom_severity")
+    
     # Форма выпуска
     forms = extract_dosage_forms(message, dosage_form_keywords)
     if forms:
@@ -926,9 +1344,31 @@ def extract_all_entities(
     result.is_pregnant = is_pregnant
     result.is_breastfeeding = is_breastfeeding
     if is_pregnant:
+        result.pregnancy_status = PregnancyStatus.PREGNANT
         matched_patterns.append("pregnancy")
     if is_breastfeeding:
+        result.pregnancy_status = PregnancyStatus.BREASTFEEDING
         matched_patterns.append("breastfeeding")
+    
+    # Статус беременности (включая отрицание)
+    pregnancy_status = extract_pregnancy_status(message)
+    if pregnancy_status:
+        result.pregnancy_status = pregnancy_status
+        matched_patterns.append("pregnancy_status")
+    
+    # Хронические заболевания
+    has_chronic, chronic_list = extract_chronic_conditions(message)
+    if has_chronic is not None:
+        result.has_chronic_conditions = has_chronic
+        result.chronic_conditions = chronic_list
+        matched_patterns.append("chronic_conditions")
+    
+    # Аллергии
+    has_allergy, allergy_list = extract_allergies(message)
+    if has_allergy is not None:
+        result.has_allergies = has_allergy
+        result.allergies = allergy_list
+        matched_patterns.append("allergies")
     
     # OTC
     result.is_otc = extract_otc_preference(message)
@@ -937,7 +1377,7 @@ def extract_all_entities(
     
     # Метаданные
     result.matched_patterns = matched_patterns
-    result.confidence = min(1.0, len(matched_patterns) * 0.2)  # Примитивная оценка
+    result.confidence = min(1.0, len(matched_patterns) * 0.15)  # Примитивная оценка
     
     return result
 
@@ -957,8 +1397,21 @@ __all__ = [
     "DISEASE_STEMS",
     "SPECIAL_FILTERS",
     "CHILDREN_MARKERS",
+    "TEENAGER_MARKERS",
+    "ADULT_MARKERS",
+    "ELDERLY_MARKERS",
+    "CHRONIC_CONDITIONS_MARKERS",
+    "SYMPTOM_DURATION_MARKERS",
+    "SYMPTOM_SEVERITY_MARKERS",
+    # Классы и константы
+    "AgeGroup",
+    "AGE_GROUP_RANGES",
+    "PregnancyStatus",
     # Основные функции извлечения
     "extract_age",
+    "extract_age_group",
+    "extract_age_group_verbose",
+    "age_to_age_group",
     "extract_price",
     "extract_price_max",
     "extract_price_min",
@@ -967,12 +1420,19 @@ __all__ = [
     "extract_symptoms",
     "extract_disease",
     "extract_diseases",
+    "extract_symptom_duration",
+    "extract_symptom_severity",
     "extract_dosage_form",
     "extract_dosage_forms",
     "extract_is_for_children",
+    "extract_is_for_teenager",
     "extract_is_for_adults",
+    "extract_is_for_elderly",
     "extract_special_filters",
     "extract_pregnancy_context",
+    "extract_pregnancy_status",
+    "extract_chronic_conditions",
+    "extract_allergies",
     "extract_otc_preference",
     # Утилиты
     "normalize_text",

@@ -69,7 +69,10 @@ from .slot_extraction import (
     SYMPTOM_PATTERN,
     SYMPTOM_STEMS,
     DISEASE_STEMS,
+    AgeGroup,
     extract_age,
+    extract_age_group,
+    age_to_age_group,
     extract_price_max,
     extract_price_min,
     extract_dosage_form,
@@ -79,6 +82,8 @@ from .slot_extraction import (
     extract_disease,
     extract_diseases,
     extract_is_for_children,
+    extract_is_for_teenager,
+    extract_is_for_elderly,
     extract_special_filters,
     extract_all_entities,
     normalize_text,
@@ -738,6 +743,22 @@ class RouterService:
         extraction = extract_all_entities(message, self._dosage_form_keywords)
         slots = extraction.to_slots_dict()
         
+        # Извлекаем возрастную группу если не была извлечена
+        if not slots.get("age_group"):
+            age_group = extract_age_group(message)
+            if age_group:
+                slots["age_group"] = age_group
+            # Если есть числовой возраст, преобразуем в группу
+            elif slots.get("age"):
+                slots["age_group"] = age_to_age_group(slots["age"])
+            # Проверяем контекстные маркеры
+            elif extract_is_for_children(message):
+                slots["age_group"] = AgeGroup.CHILD
+            elif extract_is_for_teenager(message):
+                slots["age_group"] = AgeGroup.TEENAGER
+            elif extract_is_for_elderly(message):
+                slots["age_group"] = AgeGroup.ELDERLY
+        
         # Для симптомных интентов извлекаем симптом
         if intent in (IntentType.FIND_BY_SYMPTOM, IntentType.SYMPTOM_TO_PRODUCT):
             if not slots.get("symptom"):
@@ -769,8 +790,19 @@ class RouterService:
         """Применяет дефолты из профиля пользователя."""
         prefs = user_profile.preferences
         
-        if not slots.get("age") and getattr(prefs, "age", None):
-            slots["age"] = prefs.age
+        # Возраст и возрастная группа
+        profile_age = getattr(prefs, "age", None)
+        if profile_age:
+            if not slots.get("age"):
+                slots["age"] = profile_age
+            # Если нет age_group, но есть возраст - вычисляем группу
+            if not slots.get("age_group"):
+                slots["age_group"] = age_to_age_group(profile_age)
+        
+        # Возрастная группа из профиля (если явно указана)
+        profile_age_group = getattr(prefs, "age_group", None)
+        if profile_age_group and not slots.get("age_group"):
+            slots["age_group"] = profile_age_group
         
         if not slots.get("price_max"):
             default_price = getattr(prefs, "default_max_price", None)
@@ -789,6 +821,8 @@ class RouterService:
             slots.setdefault("sugar_free", True)
         if getattr(prefs, "for_children", False):
             slots.setdefault("is_for_children", True)
+            if not slots.get("age_group"):
+                slots["age_group"] = AgeGroup.CHILD
         
         return slots
 

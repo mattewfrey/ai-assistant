@@ -85,8 +85,11 @@ class DebugMetaBuilder:
         
         # Слоты
         self._pending_slots: Optional[bool] = None
+        self._slot_prompt_pending: Optional[bool] = None  # Флаг: ожидается ответ на вопрос
+        self._pending_slot_names: List[str] = []  # Список незаполненных слотов
         self._filled_slots: List[str] = []
         self._missing_slots: List[str] = []
+        self._final_slots: Dict[str, Any] = {}  # Финальный набор слотов
         
         # Router-специфичная информация
         self._router_confidence: Optional[float] = None
@@ -172,8 +175,25 @@ class DebugMetaBuilder:
         return self
 
     def set_pending_slots(self, pending: bool) -> "DebugMetaBuilder":
-        """Устанавливает флаг ожидающих слотов."""
+        """Устанавливает флаг ожидающих слотов (deprecated, используйте set_slot_prompt_pending)."""
         self._pending_slots = pending
+        self._slot_prompt_pending = pending
+        return self
+
+    def set_slot_prompt_pending(self, pending: bool) -> "DebugMetaBuilder":
+        """Устанавливает флаг ожидания ответа на уточняющий вопрос."""
+        self._slot_prompt_pending = pending
+        self._pending_slots = pending
+        return self
+
+    def set_pending_slot_names(self, slots: List[str]) -> "DebugMetaBuilder":
+        """Устанавливает список незаполненных слотов."""
+        self._pending_slot_names = slots
+        return self
+
+    def set_final_slots(self, slots: Dict[str, Any]) -> "DebugMetaBuilder":
+        """Устанавливает финальный набор слотов."""
+        self._final_slots = slots
         return self
 
     # =========================================================================
@@ -309,12 +329,18 @@ class DebugMetaBuilder:
             self.set_request_id(str(debug.get("request_id")))
         
         # Слоты
-        if "pending_slots" in debug:
+        if "slot_prompt_pending" in debug:
+            self.set_slot_prompt_pending(bool(debug.get("slot_prompt_pending")))
+        elif "pending_slots" in debug:
             self.set_pending_slots(bool(debug.get("pending_slots")))
+        if debug.get("pending_slot_names"):
+            self.set_pending_slot_names(debug.get("pending_slot_names"))
         if debug.get("filled_slots"):
             self.set_filled_slots(debug.get("filled_slots"))
         if debug.get("missing_slots"):
             self.set_missing_slots(debug.get("missing_slots"))
+        if debug.get("final_slots"):
+            self.set_final_slots(debug.get("final_slots"))
         
         # Router
         if debug.get("router_confidence") is not None:
@@ -386,12 +412,18 @@ class DebugMetaBuilder:
             payload["request_id"] = self._request_id
         
         # Слоты
+        if self._slot_prompt_pending is not None:
+            payload["slot_prompt_pending"] = self._slot_prompt_pending
         if self._pending_slots is not None:
             payload["pending_slots"] = self._pending_slots
+        if self._pending_slot_names:
+            payload["pending_slot_names"] = self._pending_slot_names
         if self._filled_slots:
             payload["filled_slots"] = self._filled_slots
         if self._missing_slots:
             payload["missing_slots"] = self._missing_slots
+        if self._final_slots:
+            payload["final_slots"] = self._final_slots
         
         # Router-информация
         if self._router_confidence is not None:
@@ -480,8 +512,11 @@ class DebugMetaBuilder:
         new_builder._source = self._source
         new_builder._pipeline_path = self._pipeline_path
         new_builder._pending_slots = self._pending_slots
+        new_builder._slot_prompt_pending = self._slot_prompt_pending
+        new_builder._pending_slot_names = list(self._pending_slot_names)
         new_builder._filled_slots = list(self._filled_slots)
         new_builder._missing_slots = list(self._missing_slots)
+        new_builder._final_slots = dict(self._final_slots)
         new_builder._router_confidence = self._router_confidence
         new_builder._router_match_type = self._router_match_type
         new_builder._matched_triggers = list(self._matched_triggers)

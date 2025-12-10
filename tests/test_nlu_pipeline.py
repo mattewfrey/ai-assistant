@@ -478,7 +478,7 @@ class TestSlotManager:
     """Тесты SlotManager."""
     
     def test_slot_manager_prompts_for_missing_slots(self, slot_manager: SlotManager):
-        """Тест запроса недостающих слотов."""
+        """Тест запроса недостающих слотов (age_group)."""
         from app.services.router import RouterResult, SlotDefinition
         
         router_result = RouterResult(
@@ -486,7 +486,7 @@ class TestSlotManager:
             intent=IntentType.FIND_BY_SYMPTOM,
             channel=None,
             slots={"symptom": "головная боль"},
-            missing_slots=[SlotDefinition(name="age", prompt="Укажите возраст")],
+            missing_slots=[SlotDefinition(name="age_group", prompt="Для кого подбираем?")],
             confidence=0.9,
         )
         
@@ -496,27 +496,28 @@ class TestSlotManager:
             user_profile=None,
         )
         
-        # Должен спросить возраст (формулировка может быть разной)
+        # Должен спросить про возрастную группу
         text_lower = response.reply.text.lower()
-        assert any(word in text_lower for word in ["возраст", "укажите", "лет", "сколько"])
+        assert any(word in text_lower for word in ["кого", "взрослый", "ребёнок", "ребенок", "подросток", "пожилой"])
         assert response.meta.debug.get("slot_filling_used") is True
+        assert response.meta.debug.get("slot_prompt_pending") is True
     
     def test_slot_manager_handles_followup(self, slot_manager: SlotManager, dialog_store):
-        """Тест обработки ответа на уточняющий вопрос."""
-        # Устанавливаем состояние диалога с ожидающим слотом
+        """Тест обработки ответа на уточняющий вопрос (age_group)."""
+        # Устанавливаем состояние диалога с ожидающим слотом age_group
         conversation_id = "test-followup"
         dialog_store.upsert_state(
             conversation_id,
             current_intent=IntentType.FIND_BY_SYMPTOM,
             channel=None,
             slots={"symptom": "кашель"},
-            pending_slots=["age"],
-            slot_questions={"age": "Уточните возраст"},
+            pending_slots=["age_group"],
+            slot_questions={"age_group": "Для кого подбираем?"},
         )
         
-        # Отправляем ответ с возрастом
+        # Отправляем ответ с возрастной группой
         result = slot_manager.try_handle_followup(
-            request_message="нам 7 лет",
+            request_message="для ребёнка 7 лет",
             conversation_id=conversation_id,
             user_profile=None,
         )
@@ -526,8 +527,9 @@ class TestSlotManager:
         assert result.assistant_response is not None
         assert result.assistant_response.actions  # Должен быть action
         
-        # Проверяем, что возраст извлечен
+        # Проверяем, что age_group и возраст извлечены
         action = result.assistant_response.actions[0]
+        assert action.parameters.get("age_group") == "child"
         assert action.parameters.get("age") == 7
     
     def test_slot_manager_uses_profile_defaults(self, slot_manager: SlotManager):

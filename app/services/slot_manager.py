@@ -40,9 +40,14 @@ from ..intents import ActionChannel, ActionType, IntentType
 from ..models.assistant import AssistantAction, AssistantMeta, AssistantResponse, Reply
 from .dialog_state_store import DialogStateStore, get_dialog_state_store
 from .debug_meta import DebugMetaBuilder
+from .response_helpers import slot_quick_replies
 from .router import CONFIG_PATH, RouterResult
 from .slot_extraction import (
     extract_age,
+    extract_age_group,
+    age_to_age_group,
+    AgeGroup,
+    PregnancyStatus,
     extract_price_max,
     extract_price_min,
     extract_dosage_form,
@@ -50,9 +55,16 @@ from .slot_extraction import (
     extract_symptom,
     extract_symptoms,
     extract_disease,
+    extract_symptom_duration,
+    extract_symptom_severity,
     extract_is_for_children,
+    extract_is_for_teenager,
+    extract_is_for_elderly,
     extract_special_filters,
     extract_pregnancy_context,
+    extract_pregnancy_status,
+    extract_chronic_conditions,
+    extract_allergies,
     extract_otc_preference,
     check_price_indifference,
     extract_all_entities,
@@ -69,18 +81,33 @@ logger = logging.getLogger(__name__)
 
 # Приоритет слотов для уточнения (меньше = спрашивать раньше)
 SLOT_PRIORITY: Dict[str, int] = {
+    # Основная информация о запросе
     "symptom": 1,
     "disease": 1,
     "product_id": 1,
     "product_name": 1,
     "order_id": 2,
-    "age": 3,
-    "dosage_form": 4,
-    "price_max": 5,
-    "pharmacy_id": 6,
-    "metro": 6,
-    "promo_code": 7,
-    "delivery_type": 8,
+    # Критичные для безопасности
+    "age_group": 3,  # Возрастная группа - критичный слот для подбора лекарств
+    "age": 4,
+    "pregnancy_status": 5,  # Критично для женщин детородного возраста
+    # Дополнительная медицинская информация
+    "chronic_conditions": 6,
+    "has_chronic_conditions": 6,
+    "has_allergies": 7,
+    "allergies": 7,
+    "current_medications": 8,
+    # Характеристики симптомов
+    "symptom_severity": 9,
+    "symptom_duration": 9,
+    # Предпочтения
+    "dosage_form": 10,
+    "price_max": 11,
+    # Логистика
+    "pharmacy_id": 12,
+    "metro": 12,
+    "promo_code": 13,
+    "delivery_type": 14,
 }
 
 # Слоты, которые можно вывести из контекста
@@ -93,7 +120,7 @@ CONTEXTUAL_SLOTS: Set[str] = {
     "lactose_free",
 }
 
-# Интенты, для которых возраст критичен
+# Интенты, для которых возраст/возрастная группа КРИТИЧНЫ (обязательный слот)
 AGE_CRITICAL_INTENTS: Set[IntentType] = {
     IntentType.FIND_BY_SYMPTOM,
     IntentType.SYMPTOM_TO_PRODUCT,
@@ -109,6 +136,30 @@ AGE_OPTIONAL_INTENTS: Set[IntentType] = {
     IntentType.FIND_PROMO,
 }
 
+# Интенты, требующие возрастную группу (age_group)
+AGE_GROUP_REQUIRED_INTENTS: Set[IntentType] = {
+    IntentType.FIND_BY_SYMPTOM,
+    IntentType.SYMPTOM_TO_PRODUCT,
+    IntentType.FIND_BY_DISEASE,
+    IntentType.DISEASE_TO_PRODUCT,
+}
+
+# Интенты, для которых важен статус беременности (для женщин детородного возраста)
+PREGNANCY_RELEVANT_INTENTS: Set[IntentType] = {
+    IntentType.FIND_BY_SYMPTOM,
+    IntentType.SYMPTOM_TO_PRODUCT,
+    IntentType.FIND_BY_DISEASE,
+    IntentType.DISEASE_TO_PRODUCT,
+}
+
+# Интенты, для которых важны хронические заболевания
+CHRONIC_CONDITIONS_RELEVANT_INTENTS: Set[IntentType] = {
+    IntentType.FIND_BY_SYMPTOM,
+    IntentType.SYMPTOM_TO_PRODUCT,
+    IntentType.FIND_BY_DISEASE,
+    IntentType.DISEASE_TO_PRODUCT,
+}
+
 # Фразы для распознавания отказа от уточнения
 SKIP_PHRASES: Set[str] = {
     "неважно", "не важно", "любой", "любая", "любое",
@@ -119,14 +170,30 @@ SKIP_PHRASES: Set[str] = {
 
 # Вопросы для слотов по умолчанию (будут переопределены из конфига)
 DEFAULT_SLOT_QUESTIONS: Dict[str, str] = {
+    # Основные медицинские
     "symptom": "Какой симптом беспокоит? (головная боль, кашель, насморк, температура...)",
     "disease": "Какое заболевание или диагноз?",
+    "symptom_duration": "Как давно беспокоит этот симптом? (сегодня, несколько дней, неделю...)",
+    "symptom_severity": "Насколько сильно выражен симптом: слабо, умеренно или сильно?",
+    # Возраст и особые категории
+    "age_group": "Для кого подбираем препарат: взрослый, ребёнок, подросток или пожилой человек?",
     "age": "Сколько лет? Это важно для подбора безопасной дозировки.",
+    "pregnancy_status": "Уточните, пожалуйста: беременность, кормление грудью или ни то, ни другое?",
+    # Противопоказания и безопасность
+    "has_chronic_conditions": "Есть ли хронические заболевания? (диабет, гипертония, астма, проблемы с ЖКТ...)",
+    "chronic_conditions": "Какие именно хронические заболевания?",
+    "has_allergies": "Есть ли аллергия на какие-либо лекарства или компоненты?",
+    "allergies": "На какие именно препараты или вещества аллергия?",
+    "current_medications": "Принимаете ли сейчас какие-то лекарства на постоянной основе?",
+    # Предпочтения по препарату
     "price_max": "До какой суммы смотреть варианты?",
     "dosage_form": "В какой форме предпочитаете? (таблетки, сироп, спрей, капли...)",
+    "brand_preference": "Предпочитаете оригинальные препараты или подойдут аналоги?",
+    # Товары и заказы
     "product_id": "Какой товар имеете в виду? Укажите название.",
     "product_name": "Как называется препарат?",
     "order_id": "Укажите номер заказа.",
+    # Логистика
     "pharmacy_id": "Какую аптеку выбираете?",
     "metro": "Возле какой станции метро ищем?",
     "promo_code": "Введите промокод.",
@@ -435,6 +502,28 @@ class SlotManager:
         # Дополнительно проверяем специфичные слоты
         normalized = normalize_text(message)
         
+        # Возрастная группа - критичный слот
+        if "age_group" in pending_slots and not slots.get("age_group"):
+            age_group = extract_age_group(message)
+            if age_group:
+                slots["age_group"] = age_group
+            # Если извлекли возраст, но не группу - преобразуем
+            elif slots.get("age"):
+                slots["age_group"] = age_to_age_group(slots["age"])
+            # Проверяем контекстные маркеры
+            elif extract_is_for_children(message):
+                slots["age_group"] = AgeGroup.CHILD
+                slots["is_for_children"] = True
+            elif extract_is_for_teenager(message):
+                slots["age_group"] = AgeGroup.TEENAGER
+                slots["is_for_teenager"] = True
+            elif extract_is_for_elderly(message):
+                slots["age_group"] = AgeGroup.ELDERLY
+                slots["is_for_elderly"] = True
+            # "взрослый" или просто короткий ответ без детских маркеров
+            elif "взросл" in normalized or "мне" in normalized or "себе" in normalized:
+                slots["age_group"] = AgeGroup.ADULT
+        
         # Симптомы
         if "symptom" in pending_slots and not slots.get("symptom"):
             symptoms = extract_symptoms(message)
@@ -448,6 +537,40 @@ class SlotManager:
             disease = extract_disease(message)
             if disease:
                 slots["disease"] = disease
+        
+        # Статус беременности
+        if "pregnancy_status" in pending_slots and not slots.get("pregnancy_status"):
+            pregnancy_status = extract_pregnancy_status(message)
+            if pregnancy_status:
+                slots["pregnancy_status"] = pregnancy_status
+        
+        # Хронические заболевания
+        if "chronic_conditions" in pending_slots or "has_chronic_conditions" in pending_slots:
+            has_chronic, conditions = extract_chronic_conditions(message)
+            if has_chronic is not None:
+                slots["has_chronic_conditions"] = has_chronic
+                if conditions:
+                    slots["chronic_conditions"] = conditions
+        
+        # Аллергии
+        if "allergies" in pending_slots or "has_allergies" in pending_slots:
+            has_allergies, allergens = extract_allergies(message)
+            if has_allergies is not None:
+                slots["has_allergies"] = has_allergies
+                if allergens:
+                    slots["allergies"] = allergens
+        
+        # Длительность симптомов
+        if "symptom_duration" in pending_slots and not slots.get("symptom_duration"):
+            duration = extract_symptom_duration(message)
+            if duration:
+                slots["symptom_duration"] = duration
+        
+        # Выраженность симптомов
+        if "symptom_severity" in pending_slots and not slots.get("symptom_severity"):
+            severity = extract_symptom_severity(message)
+            if severity:
+                slots["symptom_severity"] = severity
         
         # Метро (простое извлечение)
         if "metro" in pending_slots:
@@ -578,21 +701,40 @@ class SlotManager:
         if not intent:
             return True
         
-        # Возраст опционален для некоторых интентов
+        # age_group ОБЯЗАТЕЛЕН для критичных интентов (подбор лекарств)
+        if slot_name == "age_group":
+            # Для интентов подбора по симптомам/болезням - ОБЯЗАТЕЛЬНО
+            if intent in AGE_GROUP_REQUIRED_INTENTS:
+                # Если уже есть age_group - не нужен
+                if current_slots.get("age_group"):
+                    return False
+                # Если есть числовой возраст - можно вычислить age_group
+                if current_slots.get("age"):
+                    return False
+                # Если есть детский/подростковый/пожилой контекст
+                if current_slots.get("is_for_children") or current_slots.get("is_for_teenager") or current_slots.get("is_for_elderly") or current_slots.get("is_for_adults"):
+                    return False
+                return True
+            return False  # Для остальных интентов - опционален
+        
+        # Возраст (точный) опционален - достаточно age_group
         if slot_name == "age":
+            # Если есть age_group - точный возраст не обязателен
+            if current_slots.get("age_group"):
+                return False
             if intent in AGE_OPTIONAL_INTENTS:
                 return False
-            
-            # Если уже есть форма выпуска, возраст менее критичен
-            if current_slots.get("dosage_form") and intent == IntentType.FIND_BY_SYMPTOM:
-                return False
-            
             # Если указан детский контекст, можем не спрашивать точный возраст
-            if current_slots.get("is_for_children"):
+            if current_slots.get("is_for_children") or current_slots.get("is_for_teenager") or current_slots.get("is_for_elderly"):
                 return False
+            return False  # age не обязателен, если есть age_group
         
         # Цена всегда опциональна
         if slot_name in ("price_max", "price_min"):
+            return False
+        
+        # dosage_form опционален
+        if slot_name == "dosage_form":
             return False
         
         return True
@@ -651,9 +793,19 @@ class SlotManager:
         
         prefs = user_profile.preferences
         
-        # Возраст
-        if not slots.get("age") and getattr(prefs, "age", None):
-            slots["age"] = prefs.age
+        # Возраст и возрастная группа
+        profile_age = getattr(prefs, "age", None)
+        if profile_age:
+            if not slots.get("age"):
+                slots["age"] = profile_age
+            # Если нет age_group, но есть возраст - вычисляем группу
+            if not slots.get("age_group"):
+                slots["age_group"] = age_to_age_group(profile_age)
+        
+        # Возрастная группа из профиля (если явно указана)
+        profile_age_group = getattr(prefs, "age_group", None)
+        if profile_age_group and not slots.get("age_group"):
+            slots["age_group"] = profile_age_group
         
         # Цена
         default_price = getattr(prefs, "default_max_price", None)
@@ -672,6 +824,20 @@ class SlotManager:
             slots.setdefault("lactose_free", True)
         if getattr(prefs, "for_children", False):
             slots.setdefault("is_for_children", True)
+            if not slots.get("age_group"):
+                slots["age_group"] = AgeGroup.CHILD
+        
+        # Хронические заболевания из профиля
+        profile_chronic = getattr(prefs, "chronic_conditions", None)
+        if profile_chronic and not slots.get("chronic_conditions"):
+            slots["chronic_conditions"] = profile_chronic
+            slots["has_chronic_conditions"] = True
+        
+        # Аллергии из профиля
+        profile_allergies = getattr(prefs, "allergies", None)
+        if profile_allergies and not slots.get("allergies"):
+            slots["allergies"] = profile_allergies
+            slots["has_allergies"] = True
         
         return slots
 
@@ -716,15 +882,23 @@ class SlotManager:
         pending_slots: List[str],
         confidence: float = 0.9,
     ) -> AssistantResponse:
-        """Строит ответ с уточняющим вопросом."""
+        """Строит ответ с уточняющим вопросом и кнопками быстрого ответа."""
+        next_slot = pending_slots[0] if pending_slots else None
+        
+        # Получаем варианты быстрого ответа для текущего слота
+        quick_replies = slot_quick_replies(next_slot, intent) if next_slot else []
+        
         meta = AssistantMeta(
             top_intent=getattr(intent, "value", None),
             confidence=confidence,
+            quick_replies=quick_replies if quick_replies else None,
             debug={
                 "slot_filling_used": True,
                 "slot_prompt_pending": True,
                 "filled_slots": list(filled_slots.keys()),
                 "pending_slots": pending_slots,
+                "final_slots": filled_slots,  # Текущее состояние слотов
+                "next_slot": next_slot,
             },
         )
         
@@ -755,7 +929,9 @@ class SlotManager:
             debug={
                 "slot_filling_used": slot_filling_used,
                 "slot_prompt_pending": False,
-                "final_slots": list(parameters.keys()),
+                "pending_slots": [],  # Все слоты заполнены
+                "filled_slots": list(parameters.keys()),
+                "final_slots": parameters,  # Полный набор слотов
             },
         )
         
