@@ -89,6 +89,7 @@ from .slot_extraction import (
     normalize_text,
     clean_symptom,
 )
+from .nlu import get_query_normalizer, QueryNormalizer
 
 logger = logging.getLogger(__name__)
 
@@ -272,7 +273,11 @@ class RouterService:
     5. Расчет confidence
     """
 
-    def __init__(self, config_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        config_path: Path | None = None,
+        query_normalizer: QueryNormalizer | None = None,
+    ) -> None:
         self._config_path = config_path or CONFIG_PATH
         self._config = self._load_config(self._config_path)
         
@@ -295,8 +300,11 @@ class RouterService:
         self._trigger_to_rules: Dict[str, List[RouterRule]] = {}
         self._build_trigger_index()
         
+        # NLU: нормализация запросов (транслитерация, spell-correction, fuzzy matching)
+        self._query_normalizer = query_normalizer or get_query_normalizer()
+        
         logger.info(
-            "RouterService initialized with %d rules, %d brands, %d symptoms",
+            "RouterService initialized with %d rules, %d brands, %d symptoms, NLU enabled",
             len(self._rules),
             len(self._brand_keywords),
             len(self._symptom_keywords),
@@ -337,15 +345,46 @@ class RouterService:
         if not message:
             return RouterResult(matched=False, router_matched=False)
         
-        # Предобработка
-        normalized = normalize_text(message)
+        # NLU: Продвинутая предобработка (транслитерация, spell-correction)
+        nlu_result = self._query_normalizer.normalize(message)
+        processed_message = nlu_result.normalized
         
-        # Многоуровневый матчинг
+        # Обновляем debug info
+        if debug_builder:
+            if nlu_result.was_transliterated:
+                debug_builder.add_extra("nlu_transliterated", True)
+            if nlu_result.was_spell_corrected:
+                debug_builder.add_extra("nlu_spell_corrected", True)
+                debug_builder.add_extra(
+                    "nlu_corrections",
+                    [{"from": c.original, "to": c.corrected} for c in nlu_result.spell_corrections]
+                )
+            if nlu_result.detected_drugs:
+                debug_builder.add_extra("nlu_detected_drugs", nlu_result.detected_drugs)
+            if nlu_result.detected_symptoms:
+                debug_builder.add_extra("nlu_detected_symptoms", nlu_result.detected_symptoms)
+        
+        # Логируем если была коррекция
+        if nlu_result.was_spell_corrected or nlu_result.was_transliterated:
+            logger.info(
+                "trace_id=%s NLU normalized: '%s' → '%s' (trans=%s, spell=%s)",
+                trace_id or "-",
+                message[:50],
+                processed_message[:50],
+                nlu_result.was_transliterated,
+                nlu_result.was_spell_corrected,
+            )
+        
+        # Предобработка (используем нормализованный текст)
+        normalized = normalize_text(processed_message)
+        
+        # Многоуровневый матчинг (используем обработанное сообщение для лучшего матчинга)
         result = self._multi_level_match(
-            message=message,
+            message=processed_message,  # NLU-нормализованное сообщение
             normalized=normalized,
             user_profile=user_profile,
             dialog_state=dialog_state,
+            original_message=message,  # Оригинал для логов
         )
         
         # Обновляем debug_builder
@@ -384,6 +423,7 @@ class RouterService:
         normalized: str,
         user_profile: UserProfile | None,
         dialog_state: DialogState | None,
+        original_message: str | None = None,
     ) -> RouterResult:
         """
         Многоуровневый матчинг с приоритизацией.
