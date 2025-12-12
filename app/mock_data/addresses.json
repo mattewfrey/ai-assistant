@@ -34,6 +34,72 @@
     "lat": 59.9347,
     "lon": 30.3357,
     "is_default": true
+  },
+  {
+    "id": "addr_test_001",
+    "user_id": "test-user-123",
+    "label": "Дом",
+    "city": "Москва",
+    "street": "Тверская улица",
+    "house": "12",
+    "apartment": "45",
+    "entrance": "2",
+    "floor": "5",
+    "region_id": "MOW",
+    "lat": 55.7599,
+    "lon": 37.6143,
+    "is_default": true
+  },
+  {
+    "id": "addr_test_002",
+    "user_id": "test-user-123",
+    "label": "Работа",
+    "city": "Москва",
+    "street": "Земляной вал",
+    "house": "50",
+    "office": "310",
+    "region_id": "MOW",
+    "lat": 55.7580,
+    "lon": 37.6610,
+    "is_default": false
+  },
+  {
+    "id": "addr_test_003",
+    "user_id": "test-user-123",
+    "label": "Родители",
+    "city": "Москва",
+    "street": "Профсоюзная улица",
+    "house": "77",
+    "apartment": "18",
+    "region_id": "MOW",
+    "lat": 55.6645,
+    "lon": 37.5581,
+    "is_default": false
+  },
+  {
+    "id": "addr_mother_001",
+    "user_id": "user-mother",
+    "label": "Дом",
+    "city": "Москва",
+    "street": "Ленинский проспект",
+    "house": "95",
+    "apartment": "22",
+    "region_id": "MOW",
+    "lat": 55.6909,
+    "lon": 37.5447,
+    "is_default": true
+  },
+  {
+    "id": "addr_elderly_001",
+    "user_id": "user-elderly",
+    "label": "Дом",
+    "city": "Москва",
+    "street": "Кутузовский проспект",
+    "house": "30",
+    "apartment": "7",
+    "region_id": "MOW",
+    "lat": 55.7412,
+    "lon": 37.5264,
+    "is_default": true
   }
 ]
-

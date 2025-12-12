@@ -6,6 +6,23 @@
   ],
   "user_2": [
     "prod_002"
-  ]
+  ],
+  "test-user-123": [
+    "prod-nurofen",
+    "prod-paracetamol",
+    "prod_001",
+    "prod-eye-drops",
+    "prod-glycine"
+  ],
+  "user-mother": [
+    "prod-baby-cough",
+    "prod-zirtek",
+    "prod-smecta"
+  ],
+  "user-elderly": [
+    "prod-validol",
+    "prod-nosha",
+    "prod_002"
+  ],
+  "default": []
 }
-

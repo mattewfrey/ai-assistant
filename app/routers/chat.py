@@ -18,7 +18,7 @@ from ..services.errors import BadRequestError
 from ..services.metrics import get_metrics_service
 from ..services.local_router import LocalRouterResult, route as local_route
 from ..services.orchestrator import Orchestrator
-from ..services.platform_client import PlatformApiClient
+from ..services.platform_client import PlatformApiClient, get_platform_client_singleton
 from ..services.router import RouterService, get_router_service
 from ..services.slot_manager import SlotManager, get_slot_manager
 from ..services.user_profile_store import UserProfileStore, get_user_profile_store
@@ -37,7 +37,7 @@ def get_assistant_client(settings: Settings = Depends(get_settings)) -> Assistan
 
 
 def get_platform_client(settings: Settings = Depends(get_settings)) -> PlatformApiClient:
-    return PlatformApiClient(settings=settings)
+    return get_platform_client_singleton(settings)
 
 
 def get_orchestrator(

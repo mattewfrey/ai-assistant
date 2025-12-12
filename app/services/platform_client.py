@@ -599,17 +599,23 @@ class PlatformApiClient:
         TODO: replace with a real write call to the cart service.
         """
 
-        product_id = parameters.get("product_id")
+        # Поддержка как product_id, так и product_name
+        product_id = parameters.get("product_id") or parameters.get("product_name") or parameters.get("name")
         if not product_id:
+            self._logger(trace_id=trace_id, request=request).warning(
+                "platform.add_to_cart called without product_id/product_name, parameters=%s",
+                parameters,
+            )
             return await self.show_cart(parameters, request, trace_id)
 
         qty = int(parameters.get("qty") or parameters.get("quantity") or 1)
         qty = max(qty, 1)
         self._logger(trace_id=trace_id, request=request).info(
-            "platform.add_to_cart product_id=%s qty=%s pharmacy=%s",
+            "platform.add_to_cart product_id=%s qty=%s pharmacy=%s user_id=%s",
             product_id,
             qty,
             getattr(request.ui_state, "selected_pharmacy_id", None) if request.ui_state else None,
+            request.user_id,
         )
         cart = self._mock.add_to_cart(request.user_id, product_id, qty)
         selected_pharmacy = request.ui_state.selected_pharmacy_id if request.ui_state else None
@@ -1421,6 +1427,9 @@ class PlatformApiClient:
             snapshot["delivery_type"] = cart["delivery_type"]
         if cart.get("delivery_info"):
             snapshot["delivery_info"] = cart["delivery_info"]
+        # Message from cart operations
+        if cart.get("message"):
+            snapshot["message"] = cart["message"]
         return snapshot
 
     def _serialize_order(self, order: Dict[str, Any]) -> Dict[str, Any]:
@@ -1488,3 +1497,17 @@ class PlatformApiClient:
                 logger.error("Platform API error calling %s: %s", url, exc)
                 raise PlatformApiClientError(str(exc)) from exc
 
+
+# Singleton instance
+_platform_client_instance: PlatformApiClient | None = None
+
+
+def get_platform_client_singleton(settings: Settings) -> PlatformApiClient:
+    """Get or create a singleton PlatformApiClient instance.
+    
+    This ensures that MockPlatform state (cart, orders) persists between requests.
+    """
+    global _platform_client_instance
+    if _platform_client_instance is None:
+        _platform_client_instance = PlatformApiClient(settings=settings)
+    return _platform_client_instance

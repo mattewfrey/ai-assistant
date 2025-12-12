@@ -388,11 +388,8 @@ class Orchestrator:
                     cart_snapshot = await self._platform_client.add_to_cart(action.parameters, request, trace_id=trace_id)
                     if cart_snapshot:
                         platform_data.cart = cart_snapshot
-                    if action.parameters.get("refresh_cart", True):
-                        _log_platform_call("show_cart", {"refresh": True})
-                        refreshed_cart = await self._platform_client.show_cart(action.parameters, request, trace_id=trace_id)
-                        if refreshed_cart:
-                            platform_data.cart = refreshed_cart
+                    # Не вызываем show_cart после add_to_cart — add_to_cart уже возвращает 
+                    # актуальную корзину с message об успешном добавлении
                     continue
                 if intent in DATA_DRIVEN_NAV_INTENTS:
                     await _fulfill_data_intent(intent, action.parameters)
@@ -558,8 +555,15 @@ class Orchestrator:
             if user_id:
                 self._maybe_flag_loyal_customer(user_id, platform_data.orders)
 
-        # Если есть статический ответ (legal/policy), используем его
-        if platform_data.message:
+        # Используем message из cart если есть (для ADD_TO_CART, SHOW_CART и т.д.)
+        cart_message = None
+        if platform_data.cart and isinstance(platform_data.cart, dict):
+            cart_message = platform_data.cart.get("message")
+        
+        if cart_message:
+            # Сообщение о действии с корзиной имеет приоритет
+            reply = Reply(text=cart_message, display_hints=reply.display_hints)
+        elif platform_data.message:
             # Для правовых интентов статический ответ имеет приоритет
             reply = Reply(text=platform_data.message, display_hints=reply.display_hints)
 

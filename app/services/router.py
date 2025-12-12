@@ -763,6 +763,22 @@ class RouterService:
             match_info=match_info,
         )
 
+    # Интенты, требующие извлечения product_name/product_id
+    _PRODUCT_SLOT_INTENTS: Set[IntentType] = {
+        IntentType.ADD_TO_CART,
+        IntentType.REMOVE_FROM_CART,
+        IntentType.CHANGE_CART_QUANTITY,
+        IntentType.ADD_TO_FAVORITES,
+        IntentType.REMOVE_FROM_FAVORITES,
+        IntentType.SHOW_PRODUCT_INFO,
+        IntentType.SHOW_PRODUCT_INSTRUCTIONS,
+        IntentType.SHOW_PRODUCT_CONTRAINDICATIONS,
+        IntentType.SHOW_PRODUCT_AVAILABILITY,
+        IntentType.SHOW_PRODUCT_REVIEWS,
+        IntentType.BOOK_PRODUCT_PICKUP,
+        IntentType.FIND_ANALOGS,
+    }
+
     def _extract_slots(
         self,
         intent: IntentType | None,
@@ -813,6 +829,15 @@ class RouterService:
                 if disease:
                     slots["disease"] = disease
         
+        # Для интентов с товарами извлекаем product_name
+        if intent in self._PRODUCT_SLOT_INTENTS:
+            if not slots.get("product_id") and not slots.get("product_name"):
+                product_name = self._extract_product_name_from_message(message, normalized, intent)
+                if product_name:
+                    slots["product_name"] = product_name
+                    slots["product_id"] = product_name  # Используем имя как временный ID
+                    slots["name"] = product_name
+        
         # Применяем дефолты из профиля
         if user_profile:
             slots = self._apply_profile_defaults(slots, user_profile)
@@ -825,6 +850,88 @@ class RouterService:
         
         # Фильтруем None значения
         return {k: v for k, v in slots.items() if v is not None}
+
+    def _extract_product_name_from_message(
+        self, 
+        message: str, 
+        normalized: str, 
+        intent: IntentType
+    ) -> Optional[str]:
+        """
+        Извлекает название товара из сообщения, удаляя триггерные части.
+        
+        Например:
+        - "Добавь нурофен в корзину" → "нурофен"
+        - "Положи 2 упаковки парацетамола в корзину" → "парацетамола"
+        """
+        # Паттерны для удаления (триггеры интентов с корзиной/избранным)
+        remove_patterns = [
+            # Корзина
+            r"добав[ьи]?\s*(?:в\s+)?корзин[уе]?",
+            r"положи?\s*(?:в\s+)?корзин[уе]?",
+            r"закинь?\s*(?:в\s+)?корзин[уе]?",
+            r"(?:в\s+)?корзин[уе]?",
+            r"убер[иь]?\s*из\s*корзин[ыуе]?",
+            r"удал[иь]?\s*из\s*корзин[ыуе]?",
+            # Избранное
+            r"добав[ьи]?\s*в\s*избранно[ей]?",
+            r"(?:в\s+)?избранно[ей]?",
+            r"убер[иь]?\s*из\s*избранн",
+            r"удал[иь]?\s*из\s*избранн",
+            # Действия
+            r"хочу\s+купить",
+            r"хочу\s+заказать",
+            r"куплю",
+            r"возьму",
+            r"беру",
+            # Количество
+            r"\d+\s*(?:штук[иу]?|упаковк[иу]?|пачк[иу]?|шт\.?)",
+            # Информация
+            r"покажи\s+(?:инструкци[юя]|информаци[юя]|отзыв[ыа]?)",
+            r"расскажи\s+(?:про|о)",
+            r"найди\s+аналог[ыи]?",
+        ]
+        
+        result = normalized
+        for pattern in remove_patterns:
+            result = re.sub(pattern, " ", result, flags=re.IGNORECASE)
+        
+        # Убираем лишние пробелы
+        result = re.sub(r"\s+", " ", result).strip()
+        
+        # Если остался пустой текст или слишком короткий - не извлекаем
+        if len(result) < 2:
+            return None
+        
+        # Проверяем, что результат похож на название товара
+        # (не generic слова)
+        generic_words = {
+            "это", "мне", "нужно", "пожалуйста", "прошу", 
+            "можно", "нужен", "хочу", "надо", "бы"
+        }
+        words = result.lower().split()
+        significant_words = [w for w in words if w not in generic_words and len(w) > 1]
+        
+        if not significant_words:
+            return None
+        
+        # Пытаемся найти известный бренд
+        for brand in self._brand_keywords:
+            if brand.lower() in result.lower():
+                return brand
+        
+        # Возвращаем очищенный текст
+        # Берём только значимые слова и капитализируем
+        cleaned = " ".join(significant_words)
+        
+        # Если первое слово с большой буквы в оригинале - сохраняем
+        for word in message.split():
+            word_clean = re.sub(r"[^\w]", "", word)
+            if word_clean.lower() in cleaned.lower() and word_clean[0].isupper():
+                cleaned = cleaned.replace(word_clean.lower(), word_clean)
+                break
+        
+        return cleaned.strip() if cleaned else None
 
     def _apply_profile_defaults(self, slots: Dict[str, Any], user_profile: UserProfile) -> Dict[str, Any]:
         """Применяет дефолты из профиля пользователя."""

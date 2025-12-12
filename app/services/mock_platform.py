@@ -65,7 +65,9 @@ class MockPlatform:
         return deepcopy(product)
 
     def _resolve_cart_key(self, user_id: Optional[str]) -> str:
-        if user_id and user_id in self._carts:
+        # Если user_id передан, используем его (создадим корзину если нет)
+        # Иначе используем "default"
+        if user_id:
             return user_id
         return "default"
 
@@ -95,6 +97,9 @@ class MockPlatform:
             total += qty * price
         payload["total"] = round(total, 2)
         payload.setdefault("currency", "RUB")
+        # Передаём сообщение о действии если есть
+        if "_message" in raw_cart:
+            payload["message"] = raw_cart["_message"]
         return payload
 
     def _order_timestamp(self, order: Dict[str, Any]) -> Optional[datetime]:
@@ -118,6 +123,31 @@ class MockPlatform:
         if not product_id:
             return None
         return self._product_snapshot(product_id)
+
+    def find_product_by_name(self, name: str) -> Dict[str, Any] | None:
+        """Поиск товара по названию (нечёткое совпадение)."""
+        if not name:
+            return None
+        name_lower = name.lower().strip()
+        
+        # Точное совпадение по названию
+        for product in self._catalog:
+            if product.get("name", "").lower() == name_lower:
+                return deepcopy(product)
+        
+        # Частичное совпадение (название содержит искомое слово)
+        for product in self._catalog:
+            product_name = product.get("name", "").lower()
+            if name_lower in product_name or product_name in name_lower:
+                return deepcopy(product)
+        
+        # Совпадение по первым буквам (нурофен -> Nurofen)
+        for product in self._catalog:
+            product_name = product.get("name", "").lower()
+            if product_name.startswith(name_lower[:3]) or name_lower.startswith(product_name[:3]):
+                return deepcopy(product)
+        
+        return None
 
     # -------------------------------------------------------------------------
     # User profile
@@ -176,35 +206,67 @@ class MockPlatform:
     # -------------------------------------------------------------------------
     # Cart
     # -------------------------------------------------------------------------
-    def get_cart(self, user_id: Optional[str]) -> Dict[str, Any]:
+    def get_cart(self, user_id: Optional[str], add_message: bool = True) -> Dict[str, Any]:
         key = self._resolve_cart_key(user_id)
         cart = self._ensure_cart_entry(key)
-        return self._cart_payload(cart)
+        payload = self._cart_payload(cart)
+        
+        # Добавляем сообщение о состоянии корзины
+        if add_message and "message" not in payload:
+            items = payload.get("items", [])
+            if not items:
+                payload["message"] = "Ваша корзина пуста."
+            else:
+                total = payload.get("total", 0)
+                item_count = sum(item.get("qty", 0) for item in items)
+                payload["message"] = f"В корзине {item_count} товар(ов) на сумму {total:.0f} ₽."
+        
+        return payload
 
     def add_to_cart(self, user_id: Optional[str], product_id: str, qty: int = 1) -> Dict[str, Any]:
+        logger.info("MockPlatform.add_to_cart called: user_id=%s, product_id=%s, qty=%s", user_id, product_id, qty)
+        
         if not product_id:
+            logger.warning("add_to_cart: product_id is empty")
             return self.get_cart(user_id)
-        if not self.get_product(product_id):
-            return self.get_cart(user_id)
+        
+        # Сначала ищем по ID, затем по имени
+        product = self.get_product(product_id)
+        logger.info("add_to_cart: get_product(%s) returned %s", product_id, product.get("name") if product else None)
+        
+        if not product:
+            product = self.find_product_by_name(product_id)
+            logger.info("add_to_cart: find_product_by_name(%s) returned %s", product_id, product.get("name") if product else None)
+        
+        if not product:
+            # Товар не найден - возвращаем корзину с сообщением
+            cart = self.get_cart(user_id)
+            cart["_message"] = f"Товар «{product_id}» не найден в каталоге. Попробуйте уточнить название."
+            return cart
+        
+        actual_product_id = product.get("id", product_id)
         key = self._resolve_cart_key(user_id)
         cart = self._ensure_cart_entry(key)
         items = cart.setdefault("items", [])
-        line = next((item for item in items if item.get("product_id") == product_id), None)
+        line = next((item for item in items if item.get("product_id") == actual_product_id), None)
         qty = max(qty, 1)
+        
         if line:
             line["qty"] = int(line.get("qty", 0)) + qty
+            cart["_message"] = f"Добавил ещё {qty} шт. «{product.get('name', product_id)}» в корзину."
         else:
-            product_snapshot = self._product_snapshot(product_id)
-            price = product_snapshot.get("price", 0.0) if product_snapshot else 0.0
+            price = product.get("price", 0.0)
             items.append(
                 {
-                    "product_id": product_id,
+                    "product_id": actual_product_id,
                     "qty": qty,
                     "price": price,
-                    "title": product_snapshot.get("name") if product_snapshot else None,
-                    "image_url": product_snapshot.get("image_url") if product_snapshot else None,
+                    "title": product.get("name"),
+                    "image_url": product.get("image_url"),
                 }
             )
+            cart["_message"] = f"«{product.get('name', product_id)}» добавлен в корзину ({qty} шт.)."
+        
         self._write_json("cart.json", self._carts)
         return self._cart_payload(cart)
 
