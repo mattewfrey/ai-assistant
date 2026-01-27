@@ -125,6 +125,12 @@ class ProductPolicyGuard:
             self._message_history[conversation_id] = self._message_history[conversation_id][-50:]
         
         return similar_count >= self.CYCLIC_MAX_SIMILAR
+
+    def is_dosage_request(self, message: str) -> bool:
+        normalized = self._normalize_message(message or "")
+        if not normalized:
+            return False
+        return any(marker in normalized for marker in self._DOSAGE_MARKERS)
     
     def evaluate(
         self,

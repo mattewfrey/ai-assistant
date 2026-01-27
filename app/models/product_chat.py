@@ -62,3 +62,22 @@ class ProductChatLLMResult(BaseModel):
     used_fields: List[str] = Field(default_factory=list)
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
+
+class ProductChatInitRequest(BaseModel):
+    """Request to initialize a product chat session."""
+    model_config = ConfigDict(extra="ignore")
+
+    product_id: str
+    user_id: Optional[str] = None
+    store_id: Optional[str] = None
+    shipping_method: Optional[str] = None
+
+
+class ProductChatInitResponse(BaseModel):
+    """Response with greeting and AI summary for a new chat session."""
+    conversation_id: str
+    product_name: str
+    greeting: str
+    ai_summary: Optional[str] = None
+    suggested_questions: List[str] = Field(default_factory=list)
+

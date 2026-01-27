@@ -111,8 +111,14 @@ class CachingService:
         cache_key = self._beautify_key(base_reply_text, data_hash, constraints_hash)
         self._cache.set(cache_key, payload, ttl_seconds)
 
-    def get_product_context(self, product_id: str, store_id: str | None, shipping_method: str | None) -> Any | None:
-        cache_key = self._product_context_key(product_id, store_id, shipping_method)
+    def get_product_context(
+        self,
+        product_id: str,
+        store_id: str | None,
+        shipping_method: str | None,
+        scope: str | None = None,
+    ) -> Any | None:
+        cache_key = self._product_context_key(product_id, store_id, shipping_method, scope)
         return self._cache.get(cache_key)
 
     def set_product_context(
@@ -120,10 +126,11 @@ class CachingService:
         product_id: str,
         store_id: str | None,
         shipping_method: str | None,
+        scope: str | None,
         payload: Any,
         ttl_seconds: int = 180,
     ) -> None:
-        cache_key = self._product_context_key(product_id, store_id, shipping_method)
+        cache_key = self._product_context_key(product_id, store_id, shipping_method, scope)
         self._cache.set(cache_key, payload, ttl_seconds)
 
     def _llm_key(self, normalized_message: str, profile_signature: str | None) -> str:
@@ -145,15 +152,54 @@ class CachingService:
         constraints_part = constraints_hash[:8] if constraints_hash else "-"
         return f"beautify:{text_hash}:{data_hash[:12]}:{constraints_part}"
 
+    # -------------------------------------------------------------------------
+    # Product Chat Answer Cache (to reduce LLM calls for similar questions)
+    # -------------------------------------------------------------------------
+    def get_product_chat_answer(
+        self,
+        product_id: str,
+        question: str,
+        context_hash: str,
+    ) -> Any | None:
+        """Get cached LLM answer for a product question."""
+        cache_key = self._product_chat_answer_key(product_id, question, context_hash)
+        return self._cache.get(cache_key)
+
+    def set_product_chat_answer(
+        self,
+        product_id: str,
+        question: str,
+        context_hash: str,
+        answer_payload: Any,
+        ttl_seconds: int = 300,  # 5 minutes cache
+    ) -> None:
+        """Cache LLM answer for a product question."""
+        cache_key = self._product_chat_answer_key(product_id, question, context_hash)
+        self._cache.set(cache_key, answer_payload, ttl_seconds)
+
+    @staticmethod
+    def _product_chat_answer_key(
+        product_id: str,
+        question: str,
+        context_hash: str,
+    ) -> str:
+        """Generate cache key for product chat answer."""
+        # Normalize question: lowercase, strip, remove extra spaces
+        normalized_q = " ".join(question.lower().strip().split())
+        q_hash = hashlib.md5(normalized_q.encode()).hexdigest()[:16]
+        return f"product_chat:{product_id}:{q_hash}:{context_hash[:12]}"
+
     @staticmethod
     def _product_context_key(
         product_id: str,
         store_id: str | None,
         shipping_method: str | None,
+        scope: str | None,
     ) -> str:
         store_part = store_id or "-"
         ship_part = shipping_method or "-"
-        return f"product_context:{product_id}:{store_part}:{ship_part}"
+        scope_part = scope or "-"
+        return f"product_context:{product_id}:{store_part}:{ship_part}:{scope_part}"
 
     @staticmethod
     def compute_data_hash(data: Dict[str, Any]) -> str:

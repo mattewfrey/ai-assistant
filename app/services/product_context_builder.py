@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import json
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -18,6 +20,9 @@ class ProductContextResult:
 
 
 class ProductContextBuilder:
+    _TAG_RE = re.compile(r"<[^>]+>")
+    _WHITESPACE_RE = re.compile(r"\s+")
+
     def __init__(
         self,
         *,
@@ -40,7 +45,8 @@ class ProductContextBuilder:
         conversation_id: Optional[str],
         user_id: Optional[str],
     ) -> ProductContextResult:
-        cached = self._cache.get_product_context(product_id, store_id, shipping_method)
+        scope = self._build_cache_scope(authorization, user_id)
+        cached = self._cache.get_product_context(product_id, store_id, shipping_method, scope)
         if cached:
             return ProductContextResult(
                 context=cached["context"],
@@ -62,6 +68,7 @@ class ProductContextBuilder:
             product_id,
             store_id,
             shipping_method,
+            scope,
             payload,
             ttl_seconds=self._settings.product_context_ttl_seconds,
         )
@@ -98,6 +105,7 @@ class ProductContextBuilder:
             "prescription": additional.get("prescription"),
             "delivery_available": additional.get("deliveryAvailable"),
             "page_info": self._truncate_text(result.get("pageInfo")),
+            "ai_summary": result.get("aiSummary"),  # AI-generated product summary
         }
         product = self._drop_empty(product)
 
@@ -423,10 +431,28 @@ class ProductContextBuilder:
     def _truncate_text(self, value: Any) -> Any:
         if not isinstance(value, str):
             return value
+        value = self._sanitize_text(value)
         max_len = self._settings.product_context_max_text_length
         if len(value) <= max_len:
             return value
         return value[: max_len - 1] + "…"
+
+    def _sanitize_text(self, value: str) -> str:
+        if not value:
+            return value
+        if "<" in value and ">" in value:
+            value = self._TAG_RE.sub(" ", value)
+        value = html.unescape(value)
+        value = self._WHITESPACE_RE.sub(" ", value).strip()
+        return value
+
+    def _build_cache_scope(self, authorization: Optional[str], user_id: Optional[str]) -> Optional[str]:
+        if authorization:
+            digest = hashlib.sha256(authorization.encode("utf-8")).hexdigest()[:12]
+            return f"auth:{digest}"
+        if user_id:
+            return f"user:{user_id}"
+        return None
 
     @staticmethod
     def _drop_empty(payload: Dict[str, Any]) -> Dict[str, Any]:

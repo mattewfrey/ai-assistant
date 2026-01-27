@@ -6,7 +6,12 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query, Request
 
 from ..config import Settings, get_settings
-from ..models.product_chat import ProductChatRequest, ProductChatResponse
+from ..models.product_chat import (
+    ProductChatRequest,
+    ProductChatResponse,
+    ProductChatInitRequest,
+    ProductChatInitResponse,
+)
 from ..models.product_faq import ProductFAQResponse
 from ..models.proactive_hints import ProactiveHintsRequest, ProactiveHintsResponse, ProactiveTriggerType
 from ..models.drug_interaction import DrugInteractionCheckRequest, DrugInteractionCheckResponse
@@ -153,6 +158,102 @@ async def post_product_message(
         authorization=authorization,
         trace_id=trace_id,
     )
+
+
+@router.post(
+    "/chat/init",
+    response_model=ProductChatInitResponse,
+    summary="Initialize a new product chat session",
+    description="Creates a new conversation and returns a greeting with AI summary if available.",
+)
+async def init_product_chat(
+    request: ProductChatInitRequest,
+    http_request: Request,
+    settings: Settings = Depends(get_settings),
+    context_builder: ProductContextBuilder = Depends(get_product_context_builder),
+    session_store: ProductChatSessionStore = Depends(get_product_chat_session_store),
+) -> ProductChatInitResponse:
+    """
+    Initialize a product chat session.
+    
+    Returns:
+    - conversation_id: Unique ID for this chat session
+    - product_name: Name of the product
+    - greeting: Welcome message
+    - ai_summary: AI-generated product summary (if available)
+    - suggested_questions: List of suggested questions to ask
+    """
+    trace_id = uuid.uuid4().hex if settings.enable_request_tracing else None
+    conversation_id = uuid.uuid4().hex
+    authorization = http_request.headers.get("Authorization")
+    
+    # Fetch product context
+    context_result = await context_builder.get_context(
+        product_id=request.product_id,
+        store_id=request.store_id,
+        shipping_method=request.shipping_method,
+        authorization=authorization,
+        trace_id=trace_id,
+        conversation_id=conversation_id,
+        user_id=request.user_id,
+    )
+    context = context_result.context
+    
+    # Bind conversation to product
+    session_store.set_product_id(conversation_id, request.product_id)
+    
+    # Extract product info
+    product = context.get("product", {})
+    product_name = product.get("name", "товар")
+    ai_summary = product.get("ai_summary")
+    
+    # Build greeting
+    greeting = f"Здравствуйте! Я AI-консультант по товару «{product_name}». Задайте мне любой вопрос о характеристиках, применении, цене или доставке."
+    
+    # Generate suggested questions based on available data
+    suggested_questions = _generate_suggested_questions(context, product_name)
+    
+    return ProductChatInitResponse(
+        conversation_id=conversation_id,
+        product_name=product_name,
+        greeting=greeting,
+        ai_summary=ai_summary,
+        suggested_questions=suggested_questions,
+    )
+
+
+def _generate_suggested_questions(context: dict, product_name: str) -> list[str]:
+    """Generate suggested questions based on available product data."""
+    questions = []
+    
+    pharma_info = context.get("pharma_info", {})
+    product = context.get("product", {})
+    
+    # Add questions based on available data
+    if pharma_info.get("composition"):
+        questions.append("Какой состав?")
+    
+    if pharma_info.get("dosage"):
+        questions.append("Как принимать?")
+    
+    if pharma_info.get("contraindications"):
+        questions.append("Есть ли противопоказания?")
+    
+    if pharma_info.get("side_effects"):
+        questions.append("Какие побочные эффекты?")
+    
+    if product.get("prescription") is not None:
+        questions.append("Нужен ли рецепт?")
+    
+    # Default questions if none generated
+    if not questions:
+        questions = [
+            "Расскажи о товаре",
+            "Какие характеристики?",
+            "Есть ли в наличии?",
+        ]
+    
+    return questions[:5]  # Limit to 5 questions
 
 
 @router.post(

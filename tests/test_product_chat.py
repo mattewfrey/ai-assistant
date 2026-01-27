@@ -53,11 +53,24 @@ class DummyLLMClient:
         user_id: str | None = None,
         trace_id: str | None = None,
     ) -> ProductChatRunResult:
-        if "гаранти" in message.lower():
+        normalized = message.lower()
+        if "гаранти" in normalized:
             result = ProductChatLLMResult(
                 answer="В карточке товара гарантия не указана.",
                 used_fields=[],
                 confidence=0.4,
+            )
+        elif "как принимать" in normalized:
+            result = ProductChatLLMResult(
+                answer="Принимать по 1 таблетке.",
+                used_fields=["product.name"],
+                confidence=0.7,
+            )
+        elif "invalid" in normalized:
+            result = ProductChatLLMResult(
+                answer="Данные есть.",
+                used_fields=["product.unknown_field"],
+                confidence=0.6,
             )
         else:
             result = ProductChatLLMResult(
@@ -127,6 +140,30 @@ def test_product_chat_no_data(client: TestClient) -> None:
     resp = client.post(
         "/api/product-ai/chat/message",
         json={"product_id": "prod-1", "message": "Какая гарантия?"},
+    )
+    assert resp.status_code == 200, resp.text
+    payload = resp.json()
+    debug = payload.get("meta", {}).get("debug") or {}
+    assert debug.get("refusal_reason") == ProductChatRefusalReason.NO_DATA.value
+    assert debug.get("used_fields") == []
+
+
+def test_product_chat_invalid_citations(client: TestClient) -> None:
+    resp = client.post(
+        "/api/product-ai/chat/message",
+        json={"product_id": "prod-1", "message": "invalid citations"},
+    )
+    assert resp.status_code == 200, resp.text
+    payload = resp.json()
+    debug = payload.get("meta", {}).get("debug") or {}
+    assert debug.get("refusal_reason") == ProductChatRefusalReason.NO_DATA.value
+    assert debug.get("used_fields") == []
+
+
+def test_product_chat_dosage_without_context(client: TestClient) -> None:
+    resp = client.post(
+        "/api/product-ai/chat/message",
+        json={"product_id": "prod-1", "message": "Как принимать?"},
     )
     assert resp.status_code == 200, resp.text
     payload = resp.json()

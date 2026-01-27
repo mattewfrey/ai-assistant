@@ -46,9 +46,12 @@ class ProductGatewayClient:
 
         # Use GET /api/v1/product-search/{id} for full product data
         url = f"{self._base_url}/api/v1/product-search/{product_id}"
-        headers: Dict[str, str] = {
-            "Flex-Locale": "country=RU;bs=gz.ru",
-        }
+        headers: Dict[str, str] = {"Flex-Locale": "country=RU;bs=gz.ru"}
+        auth_header = self._resolve_auth_header(authorization)
+        if auth_header:
+            headers["Authorization"] = auth_header
+        if trace_id:
+            headers["X-Request-Id"] = trace_id
 
         timeout = httpx.Timeout(self._settings.http_timeout_seconds)
         req_logger = get_request_logger(
@@ -73,4 +76,16 @@ class ProductGatewayClient:
             except httpx.HTTPError as exc:
                 req_logger.error("product_gateway error url=%s error=%s", url, exc)
                 raise ProductGatewayClientError(str(exc)) from exc
+
+    def _resolve_auth_header(self, authorization: Optional[str]) -> Optional[str]:
+        if authorization:
+            return authorization
+        token = self._settings.product_gateway_token
+        if not token:
+            return None
+        normalized = token.strip()
+        lower = normalized.lower()
+        if lower.startswith("bearer ") or lower.startswith("token "):
+            return normalized
+        return f"Bearer {normalized}"
 

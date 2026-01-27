@@ -27,6 +27,43 @@ API_TIMEOUT = 30.0
 
 
 # =============================================================================
+# Helpers
+# =============================================================================
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _parse_gradio_auth(value: str | None) -> tuple[str, str] | list[tuple[str, str]] | None:
+    """
+    Parse GRADIO_AUTH env var.
+
+    Formats:
+      - "user:pass"
+      - "user:pass,user2:pass2"
+    """
+    if not value or not value.strip():
+        return None
+    pairs: list[tuple[str, str]] = []
+    for item in value.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        if ":" not in item:
+            continue
+        user, pwd = item.split(":", 1)
+        user = user.strip()
+        pwd = pwd.strip()
+        if user and pwd:
+            pairs.append((user, pwd))
+    if not pairs:
+        return None
+    return pairs[0] if len(pairs) == 1 else pairs
+
+
+# =============================================================================
 # Log Collector - captures logs from the backend
 # =============================================================================
 class LogCollector:
@@ -445,6 +482,37 @@ def _format_debug_summary(debug: dict) -> str:
 # =============================================================================
 # Tab 1: Product Chat (Gradio 6.x format)
 # =============================================================================
+def init_product_chat(product_id: str, store_id: str) -> tuple[list[dict], str]:
+    """Initialize product chat with greeting and AI summary."""
+    payload = {
+        "product_id": product_id.strip(),
+        "store_id": store_id.strip() if store_id.strip() else None,
+        "shipping_method": "PICKUP",
+    }
+    
+    result = api_call("POST", "/api/product-ai/chat/init", payload)
+    
+    if "error" in result:
+        return [], ""
+    
+    conversation_id = result.get("conversation_id", "")
+    greeting = result.get("greeting", "")
+    ai_summary = result.get("ai_summary")
+    
+    # Build greeting message (without suggested questions - we have buttons for that)
+    greeting_parts = [greeting]
+    
+    if ai_summary:
+        greeting_parts.append(f"\n\n📝 **AI-обзор товара:**\n{ai_summary}")
+    
+    greeting_parts.append("\n\n👆 *Используйте кнопки быстрых вопросов или введите свой вопрос*")
+    
+    greeting_message = "".join(greeting_parts)
+    
+    history = [{"role": "assistant", "content": greeting_message}]
+    return history, conversation_id
+
+
 def chat_with_product(
     message: str,
     history: list[dict],
@@ -463,14 +531,19 @@ def chat_with_product(
     if not message.strip():
         return history, conversation_id
 
+    # Initialize chat on first message (empty conversation_id)
+    if not conversation_id.strip():
+        init_history, conversation_id = init_product_chat(product_id, store_id)
+        if init_history:
+            history = init_history
+
     payload = {
         "product_id": product_id.strip(),
         "message": message.strip(),
         "store_id": store_id.strip() if store_id.strip() else None,
         "shipping_method": "PICKUP",
+        "conversation_id": conversation_id,
     }
-    if conversation_id.strip():
-        payload["conversation_id"] = conversation_id.strip()
 
     result = api_call("POST", "/api/product-ai/chat/message", payload)
 
@@ -761,42 +834,255 @@ def get_proactive_hints(product_id: str, trigger_type: str, limit: int) -> str:
 
 
 # =============================================================================
+# Custom Theme & CSS for Professional Look
+# =============================================================================
+CUSTOM_CSS = """
+/* Calm, neutral color scheme */
+:root {
+    --primary-color: #475569;
+    --primary-hover: #334155;
+    --background-light: #f9fafb;
+    --border-color: #e5e7eb;
+    --text-primary: #1f2937;
+    --text-secondary: #6b7280;
+}
+
+/* Hide Gradio footer */
+footer {
+    display: none !important;
+}
+
+/* Main container */
+.gradio-container {
+    max-width: 1100px !important;
+    margin: 0 auto !important;
+}
+
+/* Tabs */
+.tab-nav button {
+    font-weight: 500 !important;
+    padding: 0.5rem 1rem !important;
+}
+
+/* Chat */
+.chatbot {
+    border: 1px solid var(--border-color) !important;
+    border-radius: 8px !important;
+}
+
+/* Chat messages - better readability */
+.chatbot .message {
+    font-size: 0.9rem !important;
+    line-height: 1.6 !important;
+    padding: 0.75rem 1rem !important;
+    margin-bottom: 0.5rem !important;
+}
+
+.chatbot .bot {
+    background: #f9fafb !important;
+}
+
+.chatbot .user {
+    background: #475569 !important;
+    color: white !important;
+}
+
+/* Buttons - calm style */
+button.primary {
+    background: #475569 !important;
+    border: none !important;
+    border-radius: 6px !important;
+    font-weight: 500 !important;
+}
+
+button.primary:hover {
+    background: #334155 !important;
+}
+
+button.secondary {
+    background: #f9fafb !important;
+    border: 1px solid #d1d5db !important;
+    color: #374151 !important;
+    border-radius: 6px !important;
+    font-weight: 400 !important;
+}
+
+button.secondary:hover {
+    background: #f3f4f6 !important;
+    border-color: #9ca3af !important;
+}
+
+/* Inputs */
+textarea, input[type="text"] {
+    border: 1px solid var(--border-color) !important;
+    border-radius: 6px !important;
+}
+
+textarea:focus, input[type="text"]:focus {
+    border-color: #9ca3af !important;
+    box-shadow: 0 0 0 2px rgba(156, 163, 175, 0.15) !important;
+}
+
+/* Quick buttons row - equal spacing */
+.row {
+    gap: 0.5rem !important;
+}
+"""
+
+
+# Professional theme (Gradio 6.x - passed to launch())
+# Calm, neutral colors
+DEMO_THEME = gr.themes.Soft(
+    primary_hue="slate",
+    secondary_hue="slate",
+    neutral_hue="slate",
+    font=gr.themes.GoogleFont("Inter"),
+).set(
+    button_primary_background_fill="#475569",
+    button_primary_background_fill_hover="#334155",
+    block_radius="8px",
+    input_radius="6px",
+)
+
+
+# =============================================================================
 # Build Gradio Interface (Gradio 6.x)
 # =============================================================================
 def create_demo() -> gr.Blocks:
     """Create Gradio demo interface."""
     
-    with gr.Blocks(title="Pharmacy AI Assistant Demo") as demo:
+    with gr.Blocks(title="Product AI Assistant | Demo") as demo:
         
-        gr.Markdown(
-            """
-            # 🏥 Pharmacy AI Assistant Demo
-            
-            Демонстрация возможностей AI-ассистента интернет-аптеки.
-            
-            **Вкладки:**
-            - 🤖 **Ассистент** — основной чат (поиск, заказы, корзина)
-            - 💬 **Чат с товаром** — вопросы по конкретному товару
-            - 📊 **Логи** — просмотр всех запросов и debug-информации
-            
-            **Важно:** Убедитесь, что backend запущен на `http://127.0.0.1:8000`
-            """
-        )
+        # Clean Header (white background)
+        gr.HTML("""
+            <div style="text-align: center; padding: 1.5rem 0; margin-bottom: 1rem; border-bottom: 1px solid #e5e7eb;">
+                <h1 style="margin: 0; font-size: 1.5rem; font-weight: 600; color: #1f2937;">
+                    Product AI Assistant
+                </h1>
+                <p style="margin: 0.25rem 0 0 0; font-size: 0.9rem; color: #6b7280;">
+                    Интеллектуальный консультант для карточки товара
+                </p>
+            </div>
+        """)
 
         with gr.Tabs():
-            # Tab 0: Main Assistant Chat
-            with gr.TabItem("🤖 Ассистент"):
-                gr.Markdown(
-                    """
-                    Основной чат-ассистент аптеки. Поиск товаров, заказы, корзина, аптеки и многое другое.
+            # Tab 0: Product Chat (MAIN FEATURE - First!)
+            with gr.TabItem("Консультант по товару"):
+                
+                with gr.Row():
+                    # Left sidebar - clean settings
+                    with gr.Column(scale=1, min_width=240):
+                        chat_product_id = gr.Textbox(
+                            label="Product ID",
+                            placeholder="UUID товара",
+                            value="62eb2515-1608-4812-9caa-12ad48c975c5",
+                        )
+                        
+                        chat_store_id = gr.Textbox(
+                            label="Store ID (опционально)",
+                            placeholder="ID магазина",
+                        )
+                        
+                        chat_conversation_id = gr.State("")
+                        chat_suggested_questions = gr.State([])
+                        
+                        start_chat_btn = gr.Button("Начать консультацию", variant="primary", size="lg")
+                        clear_btn = gr.Button("Очистить", variant="secondary")
                     
-                    **Примеры запросов:**
-                    - "болит голова" → поиск по симптому
-                    - "найди нурофен" → поиск по названию
-                    - "покажи корзину" → навигация
-                    - "статус заказа 123" → информация о заказе
-                    """
+                    # Main chat area
+                    with gr.Column(scale=3):
+                        chatbot = gr.Chatbot(
+                            label="Диалог",
+                            height=420,
+                        )
+                        
+                        # Quick question buttons - 4 buttons to fit in one row
+                        with gr.Row():
+                            quick_q1 = gr.Button("Состав", size="sm", variant="secondary")
+                            quick_q2 = gr.Button("Применение", size="sm", variant="secondary")
+                            quick_q3 = gr.Button("Противопоказания", size="sm", variant="secondary")
+                            quick_q4 = gr.Button("Побочные", size="sm", variant="secondary")
+                        with gr.Row():
+                            quick_q5 = gr.Button("Рецепт", size="sm", variant="secondary")
+                            quick_q6 = gr.Button("Беременность", size="sm", variant="secondary")
+                            quick_q7 = gr.Button("Хранение", size="sm", variant="secondary")
+                            quick_q8 = gr.Button("Срок годности", size="sm", variant="secondary")
+                        
+                        with gr.Row():
+                            chat_input = gr.Textbox(
+                                label="",
+                                placeholder="Введите вопрос о товаре...",
+                                lines=1,
+                                scale=5,
+                                container=False,
+                            )
+                            chat_btn = gr.Button("→", variant="primary", scale=1, min_width=60)
+
+                def handle_start_chat(product_id, store_id):
+                    """Initialize chat and show greeting with AI summary."""
+                    if not product_id.strip():
+                        return [{"role": "assistant", "content": "❌ Укажите Product ID"}], "", []
+                    
+                    history, conv_id = init_product_chat(product_id, store_id)
+                    if not history:
+                        return [{"role": "assistant", "content": "❌ Ошибка инициализации чата"}], "", []
+                    
+                    return history, conv_id, []
+
+                def handle_chat(message, history, product_id, store_id, conv_id):
+                    new_history, new_conv_id = chat_with_product(
+                        message, history, product_id, store_id, conv_id
+                    )
+                    return new_history, "", new_conv_id
+
+                def handle_quick_question(question, history, product_id, store_id, conv_id):
+                    """Handle quick question button click."""
+                    return handle_chat(question, history, product_id, store_id, conv_id)
+
+                # Start chat button
+                start_chat_btn.click(
+                    handle_start_chat,
+                    inputs=[chat_product_id, chat_store_id],
+                    outputs=[chatbot, chat_conversation_id, chat_suggested_questions],
                 )
+
+                # Send message button
+                chat_btn.click(
+                    handle_chat,
+                    inputs=[chat_input, chatbot, chat_product_id, chat_store_id, chat_conversation_id],
+                    outputs=[chatbot, chat_input, chat_conversation_id],
+                )
+                
+                # Quick question buttons
+                for btn, question in [
+                    (quick_q1, "Какой состав?"),
+                    (quick_q2, "Как принимать?"),
+                    (quick_q3, "Есть ли противопоказания?"),
+                    (quick_q4, "Какие побочные эффекты?"),
+                    (quick_q5, "Нужен ли рецепт?"),
+                    (quick_q6, "Можно беременным?"),
+                    (quick_q7, "Как хранить?"),
+                    (quick_q8, "Какой срок годности?"),
+                ]:
+                    btn.click(
+                        lambda h, p, s, c, q=question: handle_quick_question(q, h, p, s, c),
+                        inputs=[chatbot, chat_product_id, chat_store_id, chat_conversation_id],
+                        outputs=[chatbot, chat_input, chat_conversation_id],
+                    )
+                chat_input.submit(
+                    handle_chat,
+                    inputs=[chat_input, chatbot, chat_product_id, chat_store_id, chat_conversation_id],
+                    outputs=[chatbot, chat_input, chat_conversation_id],
+                )
+                
+                def do_clear():
+                    return [], "", ""
+                
+                clear_btn.click(do_clear, outputs=[chatbot, chat_input, chat_conversation_id])
+
+            # Tab 1: Main Assistant Chat (General pharmacy assistant)
+            with gr.TabItem("Ассистент"):
+                gr.Markdown("Универсальный помощник: поиск товаров, заказы, корзина.")
                 
                 with gr.Row():
                     with gr.Column(scale=1):
@@ -806,22 +1092,26 @@ def create_demo() -> gr.Blocks:
                             value="demo-user",
                         )
                         main_conversation_id = gr.State("")
-                        main_clear_btn = gr.Button("🗑️ Очистить чат")
+                        main_clear_btn = gr.Button("Очистить", variant="secondary")
                         
-                        gr.Markdown("### Debug Info")
-                        main_debug_output = gr.Markdown(
-                            value="*Отправьте сообщение...*",
-                            label="Debug",
-                        )
+                        with gr.Accordion("Debug", open=False):
+                            main_debug_output = gr.Markdown(
+                                value="*Отправьте сообщение...*",
+                            )
                     
                     with gr.Column(scale=3):
-                        main_chatbot = gr.Chatbot(label="Диалог с ассистентом", height=450)
-                        main_input = gr.Textbox(
-                            label="Ваш запрос",
-                            placeholder="болит голова, найди парацетамол, покажи заказы...",
-                            lines=2,
-                        )
-                        main_chat_btn = gr.Button("Отправить", variant="primary")
+                        main_chatbot = gr.Chatbot(label="Диалог", height=380)
+                        
+                        gr.Markdown("*Примеры: \"болит голова\", \"найди нурофен\", \"покажи корзину\"*")
+                        
+                        with gr.Row():
+                            main_input = gr.Textbox(
+                                label="Ваш запрос",
+                                placeholder="Введите запрос...",
+                                lines=1,
+                                scale=4,
+                            )
+                            main_chat_btn = gr.Button("Отправить", variant="primary", scale=1)
 
                 def handle_main_chat(message, history, user_id, conv_id):
                     new_history, new_conv_id, debug_info = chat_with_assistant(
@@ -847,55 +1137,6 @@ def create_demo() -> gr.Blocks:
                     do_main_clear, 
                     outputs=[main_chatbot, main_input, main_conversation_id, main_debug_output]
                 )
-
-            # Tab 1: Product Chat
-            with gr.TabItem("💬 Чат с товаром"):
-                gr.Markdown("Задайте вопрос о конкретном товаре. AI ответит на основе данных карточки.")
-                
-                with gr.Row():
-                    with gr.Column(scale=1):
-                        chat_product_id = gr.Textbox(
-                            label="Product ID",
-                            placeholder="62eb2515-1608-4812-9caa-12ad48c975c5",
-                            value="62eb2515-1608-4812-9caa-12ad48c975c5",
-                        )
-                        chat_store_id = gr.Textbox(
-                            label="Store ID (опционально)",
-                            placeholder="1",
-                        )
-                        chat_conversation_id = gr.State("")
-                        clear_btn = gr.Button("🗑️ Очистить чат")
-                    
-                    with gr.Column(scale=3):
-                        chatbot = gr.Chatbot(label="Диалог", height=400)
-                        chat_input = gr.Textbox(
-                            label="Ваш вопрос",
-                            placeholder="Сколько стоит? Есть в наличии? Какой состав?",
-                            lines=2,
-                        )
-                        chat_btn = gr.Button("Отправить", variant="primary")
-
-                def handle_chat(message, history, product_id, store_id, conv_id):
-                    new_history, new_conv_id = chat_with_product(
-                        message, history, product_id, store_id, conv_id
-                    )
-                    return new_history, "", new_conv_id
-
-                chat_btn.click(
-                    handle_chat,
-                    inputs=[chat_input, chatbot, chat_product_id, chat_store_id, chat_conversation_id],
-                    outputs=[chatbot, chat_input, chat_conversation_id],
-                )
-                chat_input.submit(
-                    handle_chat,
-                    inputs=[chat_input, chatbot, chat_product_id, chat_store_id, chat_conversation_id],
-                    outputs=[chatbot, chat_input, chat_conversation_id],
-                )
-                
-                def do_clear():
-                    return [], "", ""
-                
-                clear_btn.click(do_clear, outputs=[chatbot, chat_input, chat_conversation_id])
 
             # Tab 2: FAQ
             with gr.TabItem("📋 FAQ генератор"):
@@ -1160,9 +1401,10 @@ def create_demo() -> gr.Blocks:
                         llm_debug_summary = gr.Markdown("*Нажмите 'Загрузить LLM вызовы'*")
                     
                     with gr.TabItem("📝 Полный промпт"):
-                        llm_debug_prompt = gr.Code(
+                        llm_debug_prompt = gr.Textbox(
                             label="Full Prompt",
-                            language="text",
+                            lines=20,
+                            max_lines=50,
                             value="",
                         )
                     
@@ -1263,15 +1505,15 @@ def create_demo() -> gr.Blocks:
                     show_llm_call_details,
                     inputs=[llm_debug_selector],
                     outputs=[llm_debug_prompt, llm_debug_raw_response, llm_debug_parsed],
-                    outputs=[logs_output],
                 )
 
-        gr.Markdown(
-            """
-            ---
-            **Product AI Chat** | Демо-версия | [Swagger UI](http://127.0.0.1:8000/docs)
-            """
-        )
+        # Footer - centered
+        gr.HTML("""
+            <div style="text-align: center; padding: 1rem 0; margin-top: 1rem; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 0.85rem;">
+                <strong>Product AI Assistant</strong> — Демо &nbsp;•&nbsp; 
+                <a href="http://127.0.0.1:8000/docs" style="color: #475569;">API Docs</a>
+            </div>
+        """)
 
     return demo
 
@@ -1295,9 +1537,20 @@ if __name__ == "__main__":
     port = find_free_port()
     print(f"Using port: {port}")
     demo = create_demo()
+
+    # Publishing options:
+    # - GRADIO_SHARE=true -> creates a public URL (tunnel) while this process runs
+    # - GRADIO_AUTH=user:pass (or multiple "u:p,u2:p2") -> basic auth for the UI
+    share = _env_bool("GRADIO_SHARE", False)
+    server_name = os.getenv("GRADIO_SERVER_NAME", "127.0.0.1")
+    auth = _parse_gradio_auth(os.getenv("GRADIO_AUTH"))
+
     demo.launch(
-        server_name="127.0.0.1",
+        server_name=server_name,
         server_port=port,
-        share=False,
+        share=share,
+        auth=auth,
         show_error=True,
+        theme=DEMO_THEME,
+        css=CUSTOM_CSS,
     )

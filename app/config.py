@@ -69,7 +69,7 @@ class Settings(BaseSettings):
     # YandexGPT settings (через OpenAI-совместимый прокси)
     yandex_api_key: str = Field(default="", alias="YC_API_KEY")
     yandex_folder_id: str = Field(default="", alias="YC_FOLDER_ID")
-    yandex_model: str = Field(default="yandexgpt/latest", alias="YANDEX_MODEL")
+    yandex_model: str = Field(default="yandexgpt-lite/latest", alias="YANDEX_MODEL")
     # OpenAI-совместимый прокси для YandexGPT (публичный тестовый или свой)
     yandex_openai_base_url: str = Field(
         default="https://sazonovanton.online:8520/v1",
