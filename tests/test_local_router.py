@@ -39,3 +39,7 @@ def test_local_router_ignores_long_freeform_phrase():
 
     assert result.matched is False
 
+
+def test_local_router_does_not_intercept_actions():
+    result = route(ChatRequest(message="добавь нурофен в корзину"))
+    assert result.matched is False

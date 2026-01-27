@@ -59,6 +59,14 @@ class CachingService:
     def __init__(self, cache: TTLCache | None = None) -> None:
         self._cache = cache or TTLCache()
 
+    def get(self, key: str) -> Any | None:
+        """Generic get by key."""
+        return self._cache.get(key)
+
+    def set(self, key: str, value: Any, ttl_seconds: int = 600) -> None:
+        """Generic set by key."""
+        self._cache.set(key, value, ttl_seconds)
+
     def get_llm_response(self, normalized_message: str, profile_signature: str | None) -> Any | None:
         cache_key = self._llm_key(normalized_message, profile_signature)
         return self._cache.get(cache_key)
@@ -103,6 +111,21 @@ class CachingService:
         cache_key = self._beautify_key(base_reply_text, data_hash, constraints_hash)
         self._cache.set(cache_key, payload, ttl_seconds)
 
+    def get_product_context(self, product_id: str, store_id: str | None, shipping_method: str | None) -> Any | None:
+        cache_key = self._product_context_key(product_id, store_id, shipping_method)
+        return self._cache.get(cache_key)
+
+    def set_product_context(
+        self,
+        product_id: str,
+        store_id: str | None,
+        shipping_method: str | None,
+        payload: Any,
+        ttl_seconds: int = 180,
+    ) -> None:
+        cache_key = self._product_context_key(product_id, store_id, shipping_method)
+        self._cache.set(cache_key, payload, ttl_seconds)
+
     def _llm_key(self, normalized_message: str, profile_signature: str | None) -> str:
         signature = profile_signature or "-"
         return f"llm:{normalized_message.strip().lower()}::{signature}"
@@ -121,6 +144,16 @@ class CachingService:
         text_hash = hashlib.md5(base_reply_text.encode()).hexdigest()[:12]
         constraints_part = constraints_hash[:8] if constraints_hash else "-"
         return f"beautify:{text_hash}:{data_hash[:12]}:{constraints_part}"
+
+    @staticmethod
+    def _product_context_key(
+        product_id: str,
+        store_id: str | None,
+        shipping_method: str | None,
+    ) -> str:
+        store_part = store_id or "-"
+        ship_part = shipping_method or "-"
+        return f"product_context:{product_id}:{store_part}:{ship_part}"
 
     @staticmethod
     def compute_data_hash(data: Dict[str, Any]) -> str:

@@ -1,5 +1,6 @@
 # =============================================================================
 # Router Configuration - Детерминированный NLU для AI-ассистента аптеки
+# Encoding: UTF-8
 # =============================================================================
 # 
 # Приоритеты групп интентов (от высшего к низшему):
@@ -16,37 +17,17 @@
 
 defaults:
   slot_questions:
-    # Основные медицинские
     symptom: "Какой именно симптом беспокоит? (головная боль, кашель, насморк...)"
-    disease: "Какое заболевание или диагноз?"
-    symptom_duration: "Как давно беспокоит этот симптом? (сегодня, несколько дней, неделю или дольше)"
-    symptom_severity: "Насколько сильно выражен симптом: слабо, умеренно или сильно?"
-    
-    # Возраст и особые категории
     age: "Сколько лет человеку, для которого подбираем препараты?"
-    age_group: "Для кого подбираем препарат: взрослый, ребёнок, подросток или пожилой человек?"
-    pregnancy_status: "Уточните, пожалуйста: беременность, кормление грудью или ни то, ни другое?"
-    
-    # Противопоказания и безопасность
-    has_allergies: "Есть ли аллергия на какие-либо лекарства или компоненты?"
-    allergies: "На какие именно препараты или вещества аллергия?"
-    chronic_conditions: "Есть ли хронические заболевания? (диабет, гипертония, астма, проблемы с ЖКТ...)"
-    current_medications: "Принимаете ли сейчас какие-то лекарства на постоянной основе?"
-    
-    # Предпочтения по препарату
     price_max: "До какой суммы смотреть варианты? (например, до 500 рублей)"
     dosage_form: "В какой форме выпуска предпочитаете? (таблетки, сироп, спрей, капли...)"
-    brand_preference: "Предпочитаете оригинальные препараты или подойдут аналоги/дженерики?"
-    
-    # Товары и заказы
     product_id: "Какой именно товар имеете в виду? Уточните название."
-    product_name: "Как называется препарат, который ищете?"
     order_id: "Укажите номер заказа, пожалуйста."
     promo_code: "Введите промокод."
-    
-    # Аптеки
     pharmacy_id: "Какую аптеку выбираете?"
     metro: "Возле какой станции метро ищем аптеку?"
+    disease: "Какое заболевание или диагноз?"
+    product_name: "Как называется препарат, который ищете?"
 
 # =============================================================================
 # ГРУППА 1: КОРЗИНА (высший приоритет)
@@ -54,49 +35,62 @@ defaults:
 intents:
   SHOW_CART:
     channel: navigation
-    priority: 100
+    priority: 90
     triggers:
       # Прямые запросы
-      - "корзин"
-      - "тележк"
       - "что в корзине"
       - "покажи корзину"
       - "открой корзину"
-      - "моя корзина"
       - "перейти в корзину"
+      - "корзина"
+      - "корзину"
       - "cart"
       - "shopping cart"
       # Синонимы
       - "что я выбрал"
       - "мои товары"
-      - "что добавил"
       - "к оплате"
     negative_triggers:
       - "история"
       - "заказ"
+      - "добав"
+      - "полож"
+      - "закин"
+      - "убер"
+      - "удал"
+      - "очист"
+      - "измен"
+      - "колич"
+      - "в корзин"
+      - "из корзин"
+      - "купить"
+      - "заказать"
 
   ADD_TO_CART:
     channel: data
-    priority: 99
+    priority: 96
     triggers:
       - "добавь в корзин"
       - "положи в корзин"
       - "добавить в корзин"
       - "закинь в корзин"
+      - "добавь"
+      - "положи"
       - "хочу купить"
       - "хочу заказать"
       - "возьму"
       - "куплю"
       - "беру"
-      - "добавь"
     slots_required:
-      - product_id
+      - product_name
     slot_questions:
-      product_id: "Какой товар добавить в корзину? Укажите название."
+      product_name: "Какой товар добавить в корзину? Укажите название."
+    negative_triggers:
+      - "избран"
 
   REMOVE_FROM_CART:
     channel: data
-    priority: 98
+    priority: 95
     triggers:
       - "убери из корзин"
       - "удали из корзин"
@@ -104,12 +98,14 @@ intents:
       - "удалить из корзин"
       - "не нужен"
       - "передумал"
+      - "убери"
+      - "удали"
     slots_required:
-      - product_id
+      - product_name
 
   CHANGE_CART_QUANTITY:
     channel: data
-    priority: 97
+    priority: 94
     triggers:
       - "измени количество"
       - "поменяй количество"
@@ -118,11 +114,11 @@ intents:
       - "увеличь"
       - "уменьши"
     slots_required:
-      - product_id
+      - product_name
 
   CLEAR_CART:
     channel: data
-    priority: 96
+    priority: 93
     triggers:
       - "очисти корзину"
       - "очистить корзину"
@@ -142,7 +138,7 @@ intents:
 
   APPLY_PROMO_CODE:
     channel: data
-    priority: 94
+    priority: 92
     triggers:
       - "промокод"
       - "применить код"
@@ -150,6 +146,7 @@ intents:
       - "ввести промокод"
       - "использовать купон"
       - "активировать код"
+      - "ввести код"
       - "promo"
     slots_required:
       - promo_code
@@ -301,7 +298,7 @@ intents:
 # =============================================================================
   SHOW_PROFILE:
     channel: navigation
-    priority: 75
+    priority: 70
     triggers:
       - "профил"
       - "аккаунт"
@@ -312,23 +309,29 @@ intents:
       - "лк"
       - "настройки аккаунта"
     negative_triggers:
-      - "обновить"
-      - "изменить"
+      - "обнов"
+      - "измен"
+      - "поменя"
+      - "установи"
+      - "сменить"
 
   UPDATE_PROFILE:
     channel: data
-    priority: 74
+    priority: 80
     triggers:
       - "обновить профиль"
+      - "обнови профиль"
       - "изменить данные"
       - "настройки профиля"
       - "поменять телефон"
+      - "поменяй телефон"
       - "поменять адрес"
+      - "поменяй адрес"
       - "изменить имя"
 
   SHOW_FAVORITES:
     channel: navigation
-    priority: 73
+    priority: 72
     triggers:
       - "избран"
       - "любим"
@@ -338,10 +341,18 @@ intents:
       - "мои любимые"
       - "закладки"
       - "отложенные"
+    negative_triggers:
+      - "добав"
+      - "сохран"
+      - "отлож"
+      - "удал"
+      - "убер"
+      - "в избран"
+      - "из избран"
 
   ADD_TO_FAVORITES:
     channel: data
-    priority: 72
+    priority: 78
     triggers:
       - "добавь в избранное"
       - "в избранное"
@@ -349,17 +360,17 @@ intents:
       - "отложи"
       - "запомни товар"
     slots_required:
-      - product_id
+      - product_name
 
   REMOVE_FROM_FAVORITES:
     channel: data
-    priority: 71
+    priority: 77
     triggers:
       - "удали из избранного"
       - "убери из избранного"
       - "убрать из избранного"
     slots_required:
-      - product_id
+      - product_name
 
   SHOW_BONUS_BALANCE:
     channel: navigation
@@ -383,6 +394,11 @@ intents:
       - "доступные скидки"
       - "активные скидки"
       - "мои промокоды"
+    negative_triggers:
+      - "примен"
+      - "активир"
+      - "ввести"
+      - "использовать"
 
   SHOW_LOYALTY_STATUS:
     channel: navigation
@@ -682,26 +698,9 @@ intents:
       - "помогает от"
     slots_required:
       - symptom
-      - age_group
-    # Условно обязательные: спрашиваем только для женщин детородного возраста
-    conditional_slots:
-      pregnancy_status:
-        condition: "age_group == 'adult' and gender == 'female'"
-        fallback_question: "Уточните: беременность, кормление грудью или ни то, ни другое?"
-    optional_slots:
-      - price_max
-      - dosage_form
-      - chronic_conditions
-      - has_allergies
     slot_questions:
       symptom: "Какой симптом беспокоит? (головная боль, кашель, насморк, температура...)"
-      age_group: "Для кого подбираем препарат: взрослый, ребёнок, подросток или пожилой человек?"
       age: "Сколько лет? Это важно для подбора безопасной дозировки."
-      pregnancy_status: "Уточните: беременность, кормление грудью или ни то, ни другое?"
-      chronic_conditions: "Есть ли хронические заболевания? (диабет, гипертония, астма...)"
-      has_allergies: "Есть ли аллергия на какие-либо лекарства?"
-      price_max: "До какой суммы смотреть варианты?"
-      dosage_form: "В какой форме предпочитаете? (таблетки, сироп, капли...)"
 
   SYMPTOM_TO_PRODUCT:
     channel: data
@@ -760,23 +759,6 @@ intents:
       - "стоматит"
     slots_required:
       - disease
-      - age_group
-    conditional_slots:
-      pregnancy_status:
-        condition: "age_group == 'adult' and gender == 'female'"
-        fallback_question: "Уточните: беременность, кормление грудью или ни то, ни другое?"
-    optional_slots:
-      - price_max
-      - dosage_form
-      - chronic_conditions
-      - current_medications
-    slot_questions:
-      disease: "Какое заболевание или диагноз?"
-      age_group: "Для кого подбираем препарат: взрослый, ребёнок, подросток или пожилой человек?"
-      age: "Сколько лет? Это важно для подбора безопасной дозировки."
-      pregnancy_status: "Уточните: беременность, кормление грудью или ни то, ни другое?"
-      chronic_conditions: "Есть ли другие хронические заболевания?"
-      current_medications: "Принимаете ли сейчас какие-то лекарства?"
 
   DISEASE_TO_PRODUCT:
     channel: data
@@ -834,13 +816,13 @@ intents:
       - "дженерик"
       - "альтернатив"
     slots_required:
-      - product_id
+      - product_name
     slot_questions:
-      product_id: "Для какого препарата ищем аналог?"
+      product_name: "Для какого препарата ищем аналог?"
 
   FIND_BY_CATEGORY:
     channel: data
-    priority: 32
+    priority: 43
     triggers:
       - "категор"
       - "раздел"
@@ -957,10 +939,8 @@ intents:
       - "есть в наличии"
       - "где есть"
       - "в какой аптеке"
-      - "где купить"
-      - "где найти"
     slots_required:
-      - product_id
+      - product_name
 
 # =============================================================================
 # ГРУППА 8: ИНФОРМАЦИЯ О ТОВАРАХ
@@ -976,7 +956,7 @@ intents:
       - "описание товара"
       - "карточка товара"
     slots_required:
-      - product_id
+      - product_name
 
   SHOW_PRODUCT_INSTRUCTIONS:
     channel: data
@@ -990,7 +970,7 @@ intents:
       - "как использовать"
       - "как применять"
     slots_required:
-      - product_id
+      - product_name
 
   SHOW_PRODUCT_CONTRAINDICATIONS:
     channel: data
@@ -1004,7 +984,7 @@ intents:
       - "опасно ли"
       - "вред"
     slots_required:
-      - product_id
+      - product_name
 
   SHOW_DETAILED_PRODUCT_SPECIFICATIONS:
     channel: data
@@ -1017,11 +997,11 @@ intents:
       - "из чего состоит"
       - "компоненты"
     slots_required:
-      - product_id
+      - product_name
 
   SHOW_PRODUCT_AVAILABILITY:
     channel: data
-    priority: 21
+    priority: 34
     triggers:
       - "наличие"
       - "есть в аптеке"
@@ -1029,7 +1009,7 @@ intents:
       - "в каких аптеках"
       - "где забрать"
     slots_required:
-      - product_id
+      - product_name
 
   SHOW_NEAREST_PHARMACY_WITH_PRODUCT:
     channel: data
@@ -1040,7 +1020,7 @@ intents:
       - "где забрать поближе"
       - "ближайший пункт"
     slots_required:
-      - product_id
+      - product_name
 
   SHOW_PRODUCT_REVIEWS:
     channel: data
@@ -1052,7 +1032,7 @@ intents:
       - "что говорят"
       - "review"
     slots_required:
-      - product_id
+      - product_name
 
   COMPARE_PRODUCTS:
     channel: data
@@ -1075,7 +1055,7 @@ intents:
       - "отложить товар"
       - "сохрани для меня"
     slots_required:
-      - product_id
+      - product_name
 
 # =============================================================================
 # ГРУППА 9: ПОДДЕРЖКА (низкий приоритет - только явные запросы)
@@ -1309,3 +1289,13 @@ entities:
       - "бюджетно"
       - "экономно"
       - "доступно"
+  categories:
+    - "витамины"
+    - "ортопедия"
+    - "дерматология"
+    - "простуда"
+    - "аллергия"
+    - "для детей"
+    - "для беременных"
+    - "гигиена"
+    - "косметика"

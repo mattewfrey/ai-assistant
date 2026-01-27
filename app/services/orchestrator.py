@@ -189,8 +189,6 @@ class Orchestrator:
         slot_filling_used = False
         builder = debug_builder or DebugMetaBuilder(request_id=conversation_id or None)
         builder.set_router_matched(router_matched)
-        if debug_builder is None:
-            builder.set_llm_used(llm_used)
 
         def _append_orders(new_orders: Sequence[Dict[str, Any]] | None) -> None:
             if not new_orders:
@@ -209,6 +207,7 @@ class Orchestrator:
                     existing_ids.add(order_id)
         meta = assistant_response.meta.model_copy() if assistant_response.meta else AssistantMeta()
         builder.merge_existing(meta.debug)
+        builder.set_llm_used(llm_used)
         confidence = meta.confidence
         threshold = self._settings.assistant_min_confidence
         low_confidence = confidence is not None and confidence < threshold
@@ -388,8 +387,11 @@ class Orchestrator:
                     cart_snapshot = await self._platform_client.add_to_cart(action.parameters, request, trace_id=trace_id)
                     if cart_snapshot:
                         platform_data.cart = cart_snapshot
-                    # Не вызываем show_cart после add_to_cart — add_to_cart уже возвращает 
-                    # актуальную корзину с message об успешном добавлении
+                    if action.parameters.get("refresh_cart", True):
+                        _log_platform_call("show_cart", {"refresh": True})
+                        refreshed_cart = await self._platform_client.show_cart(action.parameters, request, trace_id=trace_id)
+                        if refreshed_cart:
+                            platform_data.cart = refreshed_cart
                     continue
                 if intent in DATA_DRIVEN_NAV_INTENTS:
                     await _fulfill_data_intent(intent, action.parameters)
@@ -398,23 +400,21 @@ class Orchestrator:
                     if not user_id:
                         logger.info("ADD_TO_FAVORITES requested without user_id; skipping.")
                         continue
-                    product_id = action.parameters.get("product_id")
-                    if not product_id:
-                        logger.info("ADD_TO_FAVORITES missing product_id.")
-                        continue
-                    _log_platform_call("add_favorite", {"user_id": user_id, "product_id": product_id})
-                    platform_data.favorites = self._platform_client.add_favorite(user_id, product_id, trace_id=trace_id)
+                    _log_platform_call("add_favorite", {"user_id": user_id})
+                    favorites_payload = await self._platform_client.add_favorite_action(
+                        user_id, action.parameters, request, trace_id=trace_id
+                    )
+                    platform_data.merge(favorites_payload)
                     continue
                 if intent == IntentType.REMOVE_FROM_FAVORITES:
                     if not user_id:
                         logger.info("REMOVE_FROM_FAVORITES requested without user_id; skipping.")
                         continue
-                    product_id = action.parameters.get("product_id")
-                    if not product_id:
-                        logger.info("REMOVE_FROM_FAVORITES missing product_id.")
-                        continue
-                    _log_platform_call("remove_favorite", {"user_id": user_id, "product_id": product_id})
-                    platform_data.favorites = self._platform_client.remove_favorite(user_id, product_id, trace_id=trace_id)
+                    _log_platform_call("remove_favorite", {"user_id": user_id})
+                    favorites_payload = await self._platform_client.remove_favorite_action(
+                        user_id, action.parameters, request, trace_id=trace_id
+                    )
+                    platform_data.merge(favorites_payload)
                     continue
                 if intent == IntentType.SHOW_ACTIVE_ORDERS:
                     if not user_id:
@@ -555,15 +555,8 @@ class Orchestrator:
             if user_id:
                 self._maybe_flag_loyal_customer(user_id, platform_data.orders)
 
-        # Используем message из cart если есть (для ADD_TO_CART, SHOW_CART и т.д.)
-        cart_message = None
-        if platform_data.cart and isinstance(platform_data.cart, dict):
-            cart_message = platform_data.cart.get("message")
-        
-        if cart_message:
-            # Сообщение о действии с корзиной имеет приоритет
-            reply = Reply(text=cart_message, display_hints=reply.display_hints)
-        elif platform_data.message:
+        # Если есть статический ответ (legal/policy), используем его
+        if platform_data.message:
             # Для правовых интентов статический ответ имеет приоритет
             reply = Reply(text=platform_data.message, display_hints=reply.display_hints)
 
@@ -594,9 +587,9 @@ class Orchestrator:
                         ],
                         "llm_backend": llm_backend,
                         "llm_used": llm_used,
-                        "trace_id": trace_id,  # Включаем trace_id в metadata
                     },
                     debug_builder=builder,
+                    trace_id=trace_id,
                 )
             except Exception as exc:  # pragma: no cover - safety net
                 logger.warning("Beautify reply failed, using original. error=%s", exc)
@@ -647,6 +640,16 @@ class Orchestrator:
             actions=actions,
             platform_data=platform_data,
             reply=reply,
+        )
+
+        # Логируем финальный ответ
+        request_logger.info(
+            "Final response: intent=%s reply='%s' products=%d orders=%d pipeline=%s",
+            getattr(top_intent, "value", top_intent) if top_intent else "none",
+            (reply.text or "")[:100],
+            len(platform_data.products or []),
+            len(platform_data.orders or []),
+            meta.debug.get("pipeline_path", "unknown") if meta.debug else "unknown",
         )
 
         return ChatResponse(

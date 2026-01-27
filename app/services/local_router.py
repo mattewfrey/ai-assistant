@@ -17,11 +17,50 @@ class LocalRouterResult(BaseModel):
     parameters: Dict[str, Any] = Field(default_factory=dict)
 
 
-_CART_PATTERNS = (r"\bкорзин", r"что в корзине")
+_SHOW_VERBS = (
+    "покажи",
+    "открой",
+    "посмотри",
+    "что в",
+    "перейти в",
+    "отобрази",
+)
+
+_ACTION_GUARDS = (
+    "добав",
+    "полож",
+    "закин",
+    "убер",
+    "удал",
+    "очист",
+    "измени",
+    "примен",
+    "активир",
+    "обнов",
+    "поменя",
+    "купить",
+    "заказать",
+)
+
+_CART_PATTERNS = (
+    r"(?:покажи|открой|посмотри)\s+корзин",
+    r"что в корзин",
+    r"перейти в корзин",
+    r"\bкорзина$",
+    r"\bкорзину$",
+)
 _ORDER_HISTORY_PATTERNS = (r"мои заказы", r"истори[яи] заказ", r"последние заказы")
 _ACTIVE_ORDERS_HINT = r"активн"
-_FAVORITES_PATTERNS = (r"избранн", r"избранные товары")
-_PROFILE_PATTERNS = (r"мой профиль", r"\bпрофиль\b")
+_FAVORITES_PATTERNS = (
+    r"(?:покажи|открой|посмотри)\s+избран",
+    r"избранные товары",
+    r"\bизбранное$",
+)
+_PROFILE_PATTERNS = (
+    r"(?:покажи|открой|посмотри)\s+профил",
+    r"\bмой профиль\b",
+    r"\bпрофиль\b",
+)
 _NAVIGATION_GUARDS = ("корзин", "заказ", "избран", "профил")
 
 # Фразы, которые НЕ являются запросами товаров (приветствия, благодарности и т.д.)
@@ -102,7 +141,10 @@ def route(request: ChatRequest) -> LocalRouterResult:
 
     normalized = text.lower()
 
-    if _contains_any(normalized, _CART_PATTERNS):
+    if _contains_any(normalized, _ACTION_GUARDS):
+        return LocalRouterResult(matched=False)
+
+    if _contains_any(normalized, _CART_PATTERNS) and _contains_any(normalized, _SHOW_VERBS + ("что в",)):
         return LocalRouterResult(
             matched=True,
             intent=IntentType.SHOW_CART,

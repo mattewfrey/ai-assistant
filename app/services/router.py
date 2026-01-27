@@ -69,10 +69,7 @@ from .slot_extraction import (
     SYMPTOM_PATTERN,
     SYMPTOM_STEMS,
     DISEASE_STEMS,
-    AgeGroup,
     extract_age,
-    extract_age_group,
-    age_to_age_group,
     extract_price_max,
     extract_price_min,
     extract_dosage_form,
@@ -82,14 +79,16 @@ from .slot_extraction import (
     extract_disease,
     extract_diseases,
     extract_is_for_children,
-    extract_is_for_teenager,
-    extract_is_for_elderly,
     extract_special_filters,
     extract_all_entities,
+    extract_product_phrase,
+    extract_quantity,
+    extract_promo_code,
+    extract_category,
+    extract_inn,
     normalize_text,
     clean_symptom,
 )
-from .nlu import get_query_normalizer, QueryNormalizer
 
 logger = logging.getLogger(__name__)
 
@@ -273,11 +272,7 @@ class RouterService:
     5. Расчет confidence
     """
 
-    def __init__(
-        self,
-        config_path: Path | None = None,
-        query_normalizer: QueryNormalizer | None = None,
-    ) -> None:
+    def __init__(self, config_path: Path | None = None) -> None:
         self._config_path = config_path or CONFIG_PATH
         self._config = self._load_config(self._config_path)
         
@@ -300,11 +295,8 @@ class RouterService:
         self._trigger_to_rules: Dict[str, List[RouterRule]] = {}
         self._build_trigger_index()
         
-        # NLU: нормализация запросов (транслитерация, spell-correction, fuzzy matching)
-        self._query_normalizer = query_normalizer or get_query_normalizer()
-        
         logger.info(
-            "RouterService initialized with %d rules, %d brands, %d symptoms, NLU enabled",
+            "RouterService initialized with %d rules, %d brands, %d symptoms",
             len(self._rules),
             len(self._brand_keywords),
             len(self._symptom_keywords),
@@ -345,46 +337,22 @@ class RouterService:
         if not message:
             return RouterResult(matched=False, router_matched=False)
         
-        # NLU: Продвинутая предобработка (транслитерация, spell-correction)
-        nlu_result = self._query_normalizer.normalize(message)
-        processed_message = nlu_result.normalized
+        # Предобработка
+        normalized = normalize_text(message)
         
-        # Обновляем debug info
-        if debug_builder:
-            if nlu_result.was_transliterated:
-                debug_builder.add_extra("nlu_transliterated", True)
-            if nlu_result.was_spell_corrected:
-                debug_builder.add_extra("nlu_spell_corrected", True)
-                debug_builder.add_extra(
-                    "nlu_corrections",
-                    [{"from": c.original, "to": c.corrected} for c in nlu_result.spell_corrections]
-                )
-            if nlu_result.detected_drugs:
-                debug_builder.add_extra("nlu_detected_drugs", nlu_result.detected_drugs)
-            if nlu_result.detected_symptoms:
-                debug_builder.add_extra("nlu_detected_symptoms", nlu_result.detected_symptoms)
+        logger.debug(
+            "trace_id=%s Router.match input: message='%s' normalized='%s'",
+            trace_id or "-",
+            message[:100],
+            normalized[:100],
+        )
         
-        # Логируем если была коррекция
-        if nlu_result.was_spell_corrected or nlu_result.was_transliterated:
-            logger.info(
-                "trace_id=%s NLU normalized: '%s' → '%s' (trans=%s, spell=%s)",
-                trace_id or "-",
-                message[:50],
-                processed_message[:50],
-                nlu_result.was_transliterated,
-                nlu_result.was_spell_corrected,
-            )
-        
-        # Предобработка (используем нормализованный текст)
-        normalized = normalize_text(processed_message)
-        
-        # Многоуровневый матчинг (используем обработанное сообщение для лучшего матчинга)
+        # Многоуровневый матчинг
         result = self._multi_level_match(
-            message=processed_message,  # NLU-нормализованное сообщение
+            message=message,
             normalized=normalized,
             user_profile=user_profile,
             dialog_state=dialog_state,
-            original_message=message,  # Оригинал для логов
         )
         
         # Обновляем debug_builder
@@ -423,7 +391,6 @@ class RouterService:
         normalized: str,
         user_profile: UserProfile | None,
         dialog_state: DialogState | None,
-        original_message: str | None = None,
     ) -> RouterResult:
         """
         Многоуровневый матчинг с приоритизацией.
@@ -508,24 +475,8 @@ class RouterService:
                     match_info.match_type = "symptom_keyword"
                     match_info.matched_patterns.append("symptom_stem")
                 elif self._symptom_regex.search(message):
-                    # Дополнительная проверка: убедимся что найденный "симптом" 
-                    # действительно содержит медицинские термины
-                    regex_match = self._symptom_regex.search(message)
-                    if regex_match:
-                        candidate_symptom = regex_match.group("symptom").lower().strip()
-                        # Проверяем что кандидат содержит хотя бы один медицинский термин
-                        has_medical_term = any(
-                            stem in candidate_symptom 
-                            for stem in SYMPTOM_STEMS.keys()
-                        )
-                        if has_medical_term:
-                            match_info.match_type = "symptom_regex"
-                            match_info.matched_patterns.append("symptom_pattern")
-                        else:
-                            # Regex сработал, но это не медицинский симптом — пропускаем
-                            return None
-                    else:
-                        return None
+                    match_info.match_type = "symptom_regex"
+                    match_info.matched_patterns.append("symptom_pattern")
                 else:
                     return None
             # Специальная обработка для FIND_BY_DISEASE
@@ -540,6 +491,31 @@ class RouterService:
         else:
             match_info.match_type = "keyword"
             match_info.matched_triggers = matched_triggers
+
+        # Специальные гварды для action-интентов
+        if rule.intent in {
+            IntentType.ADD_TO_CART,
+            IntentType.REMOVE_FROM_CART,
+            IntentType.CHANGE_CART_QUANTITY,
+            IntentType.CLEAR_CART,
+        }:
+            if "корзин" not in normalized and "корзину" not in normalized and "в корз" not in normalized:
+                # Для ADD_TO_CART допускаем общий "купить"/"заказать"
+                if not (
+                    rule.intent == IntentType.ADD_TO_CART
+                    and ("купить" in normalized or "заказать" in normalized or "возьму" in normalized)
+                ):
+                    return None
+            # Не допускаем путать с избранным
+            if rule.intent == IntentType.ADD_TO_CART and "избран" in normalized:
+                return None
+
+        if rule.intent == IntentType.APPLY_PROMO_CODE:
+            # Требуем промокод или явный глагол применения
+            promo = extract_promo_code(message)
+            has_apply_verb = any(v in normalized for v in ("примен", "активир", "ввест", "использовать"))
+            if not promo and not has_apply_verb:
+                return None
         
         # Успешный матч - строим результат
         return self._build_rule_result(
@@ -763,22 +739,6 @@ class RouterService:
             match_info=match_info,
         )
 
-    # Интенты, требующие извлечения product_name/product_id
-    _PRODUCT_SLOT_INTENTS: Set[IntentType] = {
-        IntentType.ADD_TO_CART,
-        IntentType.REMOVE_FROM_CART,
-        IntentType.CHANGE_CART_QUANTITY,
-        IntentType.ADD_TO_FAVORITES,
-        IntentType.REMOVE_FROM_FAVORITES,
-        IntentType.SHOW_PRODUCT_INFO,
-        IntentType.SHOW_PRODUCT_INSTRUCTIONS,
-        IntentType.SHOW_PRODUCT_CONTRAINDICATIONS,
-        IntentType.SHOW_PRODUCT_AVAILABILITY,
-        IntentType.SHOW_PRODUCT_REVIEWS,
-        IntentType.BOOK_PRODUCT_PICKUP,
-        IntentType.FIND_ANALOGS,
-    }
-
     def _extract_slots(
         self,
         intent: IntentType | None,
@@ -798,22 +758,58 @@ class RouterService:
         # Используем продвинутое извлечение
         extraction = extract_all_entities(message, self._dosage_form_keywords)
         slots = extraction.to_slots_dict()
-        
-        # Извлекаем возрастную группу если не была извлечена
-        if not slots.get("age_group"):
-            age_group = extract_age_group(message)
-            if age_group:
-                slots["age_group"] = age_group
-            # Если есть числовой возраст, преобразуем в группу
-            elif slots.get("age"):
-                slots["age_group"] = age_to_age_group(slots["age"])
-            # Проверяем контекстные маркеры
-            elif extract_is_for_children(message):
-                slots["age_group"] = AgeGroup.CHILD
-            elif extract_is_for_teenager(message):
-                slots["age_group"] = AgeGroup.TEENAGER
-            elif extract_is_for_elderly(message):
-                slots["age_group"] = AgeGroup.ELDERLY
+
+        # Извлекаем product_name и количество для action-интентов
+        product_name_intents = {
+            IntentType.ADD_TO_CART,
+            IntentType.REMOVE_FROM_CART,
+            IntentType.CHANGE_CART_QUANTITY,
+            IntentType.CLEAR_CART,
+            IntentType.ADD_TO_FAVORITES,
+            IntentType.REMOVE_FROM_FAVORITES,
+            IntentType.FIND_ANALOGS,
+            IntentType.FIND_BY_PHARMACY_AVAILABILITY,
+            IntentType.SHOW_PRODUCT_INFO,
+            IntentType.SHOW_PRODUCT_INSTRUCTIONS,
+            IntentType.SHOW_PRODUCT_CONTRAINDICATIONS,
+            IntentType.SHOW_PRODUCT_AVAILABILITY,
+            IntentType.SHOW_NEAREST_PHARMACY_WITH_PRODUCT,
+            IntentType.SHOW_PRODUCT_REVIEWS,
+            IntentType.SHOW_DETAILED_PRODUCT_SPECIFICATIONS,
+            IntentType.BOOK_PRODUCT_PICKUP,
+        }
+
+        if intent in product_name_intents and not slots.get("product_name"):
+            product_phrase = extract_product_phrase(message, normalized, getattr(intent, "value", None))
+            if product_phrase:
+                slots["product_name"] = product_phrase
+                slots.setdefault("name", product_phrase)
+
+        cart_intents = {
+            IntentType.ADD_TO_CART,
+            IntentType.REMOVE_FROM_CART,
+            IntentType.CHANGE_CART_QUANTITY,
+        }
+        if intent in cart_intents:
+            qty = extract_quantity(message)
+            if qty:
+                slots.setdefault("qty", qty)
+                slots.setdefault("quantity", qty)
+
+        if intent == IntentType.APPLY_PROMO_CODE and not slots.get("promo_code"):
+            promo = extract_promo_code(message)
+            if promo:
+                slots["promo_code"] = promo
+
+        if intent == IntentType.FIND_BY_CATEGORY and not slots.get("category"):
+            category = extract_category(message)
+            if category:
+                slots["category"] = category
+
+        if intent == IntentType.FIND_PRODUCT_BY_INN and not slots.get("inn"):
+            inn_value = extract_inn(message)
+            if inn_value:
+                slots["inn"] = inn_value
         
         # Для симптомных интентов извлекаем симптом
         if intent in (IntentType.FIND_BY_SYMPTOM, IntentType.SYMPTOM_TO_PRODUCT):
@@ -829,15 +825,6 @@ class RouterService:
                 if disease:
                     slots["disease"] = disease
         
-        # Для интентов с товарами извлекаем product_name
-        if intent in self._PRODUCT_SLOT_INTENTS:
-            if not slots.get("product_id") and not slots.get("product_name"):
-                product_name = self._extract_product_name_from_message(message, normalized, intent)
-                if product_name:
-                    slots["product_name"] = product_name
-                    slots["product_id"] = product_name  # Используем имя как временный ID
-                    slots["name"] = product_name
-        
         # Применяем дефолты из профиля
         if user_profile:
             slots = self._apply_profile_defaults(slots, user_profile)
@@ -851,105 +838,12 @@ class RouterService:
         # Фильтруем None значения
         return {k: v for k, v in slots.items() if v is not None}
 
-    def _extract_product_name_from_message(
-        self, 
-        message: str, 
-        normalized: str, 
-        intent: IntentType
-    ) -> Optional[str]:
-        """
-        Извлекает название товара из сообщения, удаляя триггерные части.
-        
-        Например:
-        - "Добавь нурофен в корзину" → "нурофен"
-        - "Положи 2 упаковки парацетамола в корзину" → "парацетамола"
-        """
-        # Паттерны для удаления (триггеры интентов с корзиной/избранным)
-        remove_patterns = [
-            # Корзина
-            r"добав[ьи]?\s*(?:в\s+)?корзин[уе]?",
-            r"положи?\s*(?:в\s+)?корзин[уе]?",
-            r"закинь?\s*(?:в\s+)?корзин[уе]?",
-            r"(?:в\s+)?корзин[уе]?",
-            r"убер[иь]?\s*из\s*корзин[ыуе]?",
-            r"удал[иь]?\s*из\s*корзин[ыуе]?",
-            # Избранное
-            r"добав[ьи]?\s*в\s*избранно[ей]?",
-            r"(?:в\s+)?избранно[ей]?",
-            r"убер[иь]?\s*из\s*избранн",
-            r"удал[иь]?\s*из\s*избранн",
-            # Действия
-            r"хочу\s+купить",
-            r"хочу\s+заказать",
-            r"куплю",
-            r"возьму",
-            r"беру",
-            # Количество
-            r"\d+\s*(?:штук[иу]?|упаковк[иу]?|пачк[иу]?|шт\.?)",
-            # Информация
-            r"покажи\s+(?:инструкци[юя]|информаци[юя]|отзыв[ыа]?)",
-            r"расскажи\s+(?:про|о)",
-            r"найди\s+аналог[ыи]?",
-        ]
-        
-        result = normalized
-        for pattern in remove_patterns:
-            result = re.sub(pattern, " ", result, flags=re.IGNORECASE)
-        
-        # Убираем лишние пробелы
-        result = re.sub(r"\s+", " ", result).strip()
-        
-        # Если остался пустой текст или слишком короткий - не извлекаем
-        if len(result) < 2:
-            return None
-        
-        # Проверяем, что результат похож на название товара
-        # (не generic слова)
-        generic_words = {
-            "это", "мне", "нужно", "пожалуйста", "прошу", 
-            "можно", "нужен", "хочу", "надо", "бы"
-        }
-        words = result.lower().split()
-        significant_words = [w for w in words if w not in generic_words and len(w) > 1]
-        
-        if not significant_words:
-            return None
-        
-        # Пытаемся найти известный бренд
-        for brand in self._brand_keywords:
-            if brand.lower() in result.lower():
-                return brand
-        
-        # Возвращаем очищенный текст
-        # Берём только значимые слова и капитализируем
-        cleaned = " ".join(significant_words)
-        
-        # Если первое слово с большой буквы в оригинале - сохраняем
-        for word in message.split():
-            word_clean = re.sub(r"[^\w]", "", word)
-            if word_clean.lower() in cleaned.lower() and word_clean[0].isupper():
-                cleaned = cleaned.replace(word_clean.lower(), word_clean)
-                break
-        
-        return cleaned.strip() if cleaned else None
-
     def _apply_profile_defaults(self, slots: Dict[str, Any], user_profile: UserProfile) -> Dict[str, Any]:
         """Применяет дефолты из профиля пользователя."""
         prefs = user_profile.preferences
         
-        # Возраст и возрастная группа
-        profile_age = getattr(prefs, "age", None)
-        if profile_age:
-            if not slots.get("age"):
-                slots["age"] = profile_age
-            # Если нет age_group, но есть возраст - вычисляем группу
-            if not slots.get("age_group"):
-                slots["age_group"] = age_to_age_group(profile_age)
-        
-        # Возрастная группа из профиля (если явно указана)
-        profile_age_group = getattr(prefs, "age_group", None)
-        if profile_age_group and not slots.get("age_group"):
-            slots["age_group"] = profile_age_group
+        if not slots.get("age") and getattr(prefs, "age", None):
+            slots["age"] = prefs.age
         
         if not slots.get("price_max"):
             default_price = getattr(prefs, "default_max_price", None)
@@ -968,8 +862,6 @@ class RouterService:
             slots.setdefault("sugar_free", True)
         if getattr(prefs, "for_children", False):
             slots.setdefault("is_for_children", True)
-            if not slots.get("age_group"):
-                slots["age_group"] = AgeGroup.CHILD
         
         return slots
 

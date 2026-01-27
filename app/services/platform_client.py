@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from difflib import SequenceMatcher
 import uuid
 from typing import Any, Awaitable, Callable, Dict, List, Sequence
 
@@ -90,6 +91,70 @@ class PlatformApiClient:
         self._mock = MockPlatform()
         self._cache = get_caching_service()
 
+    # ------------------------------------------------------------------ helpers
+    def _find_product_candidates_by_name(self, query: str, limit: int = 5) -> List[tuple[DataProduct, float]]:
+        """Returns catalog candidates scored by name similarity."""
+        normalized = (query or "").strip().lower()
+        if not normalized:
+            return []
+        candidates: List[tuple[DataProduct, float]] = []
+        for raw in self._mock.list_products():
+            try:
+                product = DataProduct.model_validate(raw)
+            except ValidationError:
+                continue
+            name = (product.name or "").lower()
+            score = SequenceMatcher(None, normalized, name).ratio()
+            if normalized and normalized in name:
+                score += 0.2
+            if any(normalized in tag.lower() for tag in product.tags):
+                score += 0.1
+            candidates.append((product, score))
+        candidates.sort(key=lambda item: item[1], reverse=True)
+        return candidates[:limit]
+
+    def _build_disambiguation_payload(self, products: List[DataProduct], message: str) -> DataPayload:
+        quick_replies = [str(idx + 1) for idx, _ in enumerate(products[:5])]
+        return DataPayload(
+            products=[p.model_dump() for p in products[:5]],
+            message=message,
+            metadata={"disambiguation": True, "quick_replies": quick_replies},
+        )
+
+    def _resolve_product_from_params(
+        self,
+        parameters: Dict[str, Any],
+        request: ChatRequest,
+        trace_id: str | None = None,
+    ) -> tuple[str | None, DataPayload | None]:
+        """Resolve product_id from either id or product_name/name with clarification support."""
+        product_id = parameters.get("product_id")
+        if product_id:
+            product = self._get_product_by_id(product_id)
+            if product:
+                return product.id, None
+            return None, DataPayload(message="Товар не найден.")
+
+        query = str(parameters.get("product_name") or parameters.get("name") or request.message or "").strip()
+        if not query:
+            return None, DataPayload(message="Пожалуйста, укажите товар.")
+
+        candidates = self._find_product_candidates_by_name(query, limit=5)
+        if not candidates:
+            return None, DataPayload(message="Не нашёл товар, уточните название.")
+
+        best_product, best_score = candidates[0]
+        second_score = candidates[1][1] if len(candidates) > 1 else 0.0
+        ambiguous = best_score - second_score < 0.1
+
+        if ambiguous or best_score < 0.55:
+            self._logger(trace_id=trace_id, request=request).info(
+                "product_disambiguation query=%s candidates=%s", query, len(candidates)
+            )
+            return None, self._build_disambiguation_payload([c[0] for c in candidates], "Нашёл несколько вариантов. Уточните какой именно?")
+
+        return best_product.id, None
+
     def _logger(
         self,
         *,
@@ -148,6 +213,28 @@ class PlatformApiClient:
         )
         favorites = self._mock.remove_favorite(user_id, product_id)
         return self._serialize_products(favorites)
+
+    async def add_favorite_action(
+        self, user_id: str, parameters: Dict[str, Any], request: ChatRequest, trace_id: str | None = None
+    ) -> DataPayload:
+        product_id, disambiguation = self._resolve_product_from_params(parameters, request, trace_id)
+        if disambiguation:
+            return disambiguation
+        if not product_id:
+            return DataPayload(message="Пожалуйста, укажите товар.")
+        favorites = self._mock.add_favorite(user_id, product_id)
+        return DataPayload(favorites=self._serialize_products(favorites))
+
+    async def remove_favorite_action(
+        self, user_id: str, parameters: Dict[str, Any], request: ChatRequest, trace_id: str | None = None
+    ) -> DataPayload:
+        product_id, disambiguation = self._resolve_product_from_params(parameters, request, trace_id)
+        if disambiguation:
+            return disambiguation
+        if not product_id:
+            return DataPayload(message="Пожалуйста, укажите товар.")
+        favorites = self._mock.remove_favorite(user_id, product_id)
+        return DataPayload(favorites=self._serialize_products(favorites))
 
     def get_orders(self, user_id: str, status: str | None = None, trace_id: str | None = None) -> List[Dict[str, Any]]:
         self._logger(trace_id=trace_id, user_id=user_id).info(
@@ -256,9 +343,10 @@ class PlatformApiClient:
         # Product search handlers
         search_intents = {
             IntentType.FIND_PRODUCT_BY_INN: self.find_by_inn,
-            IntentType.FIND_ANALOGS: self.find_analogs,
             IntentType.FIND_PROMO: self.find_promo,
         }
+        if intent == IntentType.FIND_ANALOGS:
+            return await self._handle_find_analogs(action.parameters, request, user_profile, trace_id)
         if intent in search_intents:
             handler = search_intents[intent]
             products = await handler(action.parameters, request, user_profile, trace_id)
@@ -598,24 +686,25 @@ class PlatformApiClient:
 
         TODO: replace with a real write call to the cart service.
         """
-
-        # Поддержка как product_id, так и product_name
-        product_id = parameters.get("product_id") or parameters.get("product_name") or parameters.get("name")
+        product_id, disambiguation = self._resolve_product_from_params(parameters, request, trace_id)
+        if disambiguation:
+            return {
+                "items": [],
+                "message": disambiguation.message,
+                "products": disambiguation.products,
+                "metadata": disambiguation.metadata,
+            }
         if not product_id:
-            self._logger(trace_id=trace_id, request=request).warning(
-                "platform.add_to_cart called without product_id/product_name, parameters=%s",
-                parameters,
-            )
-            return await self.show_cart(parameters, request, trace_id)
+            return {"message": "Пожалуйста, укажите товар."}
 
+        parameters["product_id"] = product_id
         qty = int(parameters.get("qty") or parameters.get("quantity") or 1)
         qty = max(qty, 1)
         self._logger(trace_id=trace_id, request=request).info(
-            "platform.add_to_cart product_id=%s qty=%s pharmacy=%s user_id=%s",
+            "platform.add_to_cart product_id=%s qty=%s pharmacy=%s",
             product_id,
             qty,
             getattr(request.ui_state, "selected_pharmacy_id", None) if request.ui_state else None,
-            request.user_id,
         )
         cart = self._mock.add_to_cart(request.user_id, product_id, qty)
         selected_pharmacy = request.ui_state.selected_pharmacy_id if request.ui_state else None
@@ -670,9 +759,12 @@ class PlatformApiClient:
         self, intent: IntentType, parameters: Dict[str, Any], request: ChatRequest, trace_id: str | None = None
     ) -> DataPayload:
         """Handle product information requests."""
-        product_id = parameters.get("product_id")
+        product_id, disambiguation = self._resolve_product_from_params(parameters, request, trace_id)
+        if disambiguation:
+            return disambiguation
         if not product_id:
             return DataPayload(message="Пожалуйста, укажите товар.")
+        parameters["product_id"] = product_id
 
         self._logger(trace_id=trace_id, request=request).info(
             "platform.product_info intent=%s product_id=%s", intent, product_id
@@ -770,6 +862,22 @@ class PlatformApiClient:
             parameters=parameters,
         )
 
+    async def _handle_find_analogs(
+        self,
+        parameters: Dict[str, Any],
+        request: ChatRequest,
+        user_profile: UserProfile | None,
+        trace_id: str | None = None,
+    ) -> DataPayload:
+        product_id, disambiguation = self._resolve_product_from_params(parameters, request, trace_id)
+        if disambiguation:
+            return disambiguation
+        if not product_id:
+            return DataPayload(message="Пожалуйста, укажите товар.")
+        parameters["product_id"] = product_id
+        products = await self.find_analogs(parameters, request, user_profile, trace_id)
+        return DataPayload(products=[p.model_dump() for p in products])
+
     async def find_promo(
         self, parameters: Dict[str, Any], request: ChatRequest, user_profile: UserProfile | None, trace_id: str | None = None
     ) -> List[DataProduct]:
@@ -837,9 +945,12 @@ class PlatformApiClient:
             )
 
         if intent == IntentType.SHOW_PRODUCT_AVAILABILITY:
-            product_id = parameters.get("product_id")
+            product_id, disambiguation = self._resolve_product_from_params(parameters, request, trace_id)
+            if disambiguation:
+                return disambiguation
             if not product_id:
                 return DataPayload(message="Пожалуйста, укажите товар.")
+            parameters["product_id"] = product_id
             availability = self._mock.get_product_availability_by_pharmacies(product_id)
             product = self._get_product_by_id(product_id)
             req_logger.info("platform.show_product_availability product_id=%s", product_id)
@@ -849,9 +960,12 @@ class PlatformApiClient:
             )
 
         if intent == IntentType.SHOW_NEAREST_PHARMACY_WITH_PRODUCT:
-            product_id = parameters.get("product_id")
+            product_id, disambiguation = self._resolve_product_from_params(parameters, request, trace_id)
+            if disambiguation:
+                return disambiguation
             if not product_id:
                 return DataPayload(message="Пожалуйста, укажите товар.")
+            parameters["product_id"] = product_id
             region = None
             if user_profile and user_profile.preferences:
                 region = getattr(user_profile.preferences, "region", None)
@@ -1427,9 +1541,6 @@ class PlatformApiClient:
             snapshot["delivery_type"] = cart["delivery_type"]
         if cart.get("delivery_info"):
             snapshot["delivery_info"] = cart["delivery_info"]
-        # Message from cart operations
-        if cart.get("message"):
-            snapshot["message"] = cart["message"]
         return snapshot
 
     def _serialize_order(self, order: Dict[str, Any]) -> Dict[str, Any]:
@@ -1497,17 +1608,3 @@ class PlatformApiClient:
                 logger.error("Platform API error calling %s: %s", url, exc)
                 raise PlatformApiClientError(str(exc)) from exc
 
-
-# Singleton instance
-_platform_client_instance: PlatformApiClient | None = None
-
-
-def get_platform_client_singleton(settings: Settings) -> PlatformApiClient:
-    """Get or create a singleton PlatformApiClient instance.
-    
-    This ensures that MockPlatform state (cart, orders) persists between requests.
-    """
-    global _platform_client_instance
-    if _platform_client_instance is None:
-        _platform_client_instance = PlatformApiClient(settings=settings)
-    return _platform_client_instance

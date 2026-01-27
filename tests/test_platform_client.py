@@ -373,6 +373,23 @@ async def test_select_delivery_type(platform_client: PlatformApiClient, user_req
     assert cart is not None
 
 
+@pytest.mark.asyncio
+async def test_add_to_cart_with_product_name(platform_client: PlatformApiClient, user_request: ChatRequest) -> None:
+    """ADD_TO_CART should work with product_name without falling back to show_cart."""
+    cart = await platform_client.add_to_cart({"product_name": "Нурофен"}, user_request)
+
+    assert cart, "Expected cart response"
+    assert cart.get("items") is not None or cart.get("items_count") is not None
+
+
+@pytest.mark.asyncio
+async def test_add_to_cart_requires_product(platform_client: PlatformApiClient, user_request: ChatRequest) -> None:
+    """ADD_TO_CART without product should request clarification instead of showing cart."""
+    cart = await platform_client.add_to_cart({}, user_request)
+
+    assert "message" in cart
+
+
 # =============================================================================
 # User Handlers
 # =============================================================================

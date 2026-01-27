@@ -45,12 +45,36 @@ class Settings(BaseSettings):
     enable_request_tracing: bool = Field(default=True, alias="ENABLE_REQUEST_TRACING")
     enable_local_router: bool = Field(default=True, alias="ENABLE_LOCAL_ROUTER")
 
+    # Product AI Chat settings
+    product_gateway_base_url: str = Field(
+        default="https://flex-stage-client-gateway.366.ru",
+        alias="PRODUCT_GATEWAY_BASE_URL",
+    )
+    product_gateway_token: str = Field(default="", alias="PRODUCT_GATEWAY_TOKEN")
+    product_context_ttl_seconds: int = Field(default=180, alias="PRODUCT_CONTEXT_TTL_SECONDS")
+    product_context_max_attributes: int = Field(default=50, alias="PRODUCT_CONTEXT_MAX_ATTRIBUTES")
+    product_context_max_labels: int = Field(default=20, alias="PRODUCT_CONTEXT_MAX_LABELS")
+    product_context_max_text_length: int = Field(default=600, alias="PRODUCT_CONTEXT_MAX_TEXT_LENGTH")
+
     # Rate limiting settings
     llm_rate_limit_window_seconds: int = Field(default=60, alias="LLM_RATE_LIMIT_WINDOW")
     llm_rate_limit_max_calls: int = Field(default=20, alias="LLM_RATE_LIMIT_MAX_CALLS")
 
     # Price validation bounds
     price_max_upper_bound: float = Field(default=500_000.0, alias="PRICE_MAX_UPPER_BOUND")
+
+    # LLM Provider settings
+    llm_provider: str = Field(default="openai", alias="LLM_PROVIDER")  # "openai" or "yandex"
+    
+    # YandexGPT settings (через OpenAI-совместимый прокси)
+    yandex_api_key: str = Field(default="", alias="YC_API_KEY")
+    yandex_folder_id: str = Field(default="", alias="YC_FOLDER_ID")
+    yandex_model: str = Field(default="yandexgpt/latest", alias="YANDEX_MODEL")
+    # OpenAI-совместимый прокси для YandexGPT (публичный тестовый или свой)
+    yandex_openai_base_url: str = Field(
+        default="https://sazonovanton.online:8520/v1",
+        alias="YANDEX_OPENAI_BASE_URL",
+    )
 
 
 @lru_cache(maxsize=1)

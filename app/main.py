@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 import logging
+import sys
+import warnings
 from typing import Any
+
+# Suppress Pydantic V1 compatibility warning from langsmith on Python 3.14+
+warnings.filterwarnings("ignore", message="Core Pydantic V1 functionality")
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -9,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .routers import chat
+from .routers import product_chat
 from .services.error_handling import (
     build_error_response,
     extract_conversation_id,
@@ -17,6 +23,42 @@ from .services.error_handling import (
 )
 from .services.errors import AssistantError, map_exception
 
+
+def setup_logging() -> None:
+    """Configure logging for the application."""
+    settings = get_settings()
+    
+    # Determine log level from settings
+    log_level = logging.DEBUG if settings.debug else logging.INFO
+    
+    # Create formatter with detailed output
+    formatter = logging.Formatter(
+        fmt="%(asctime)s | %(levelname)-7s | %(name)s | %(message)s",
+        datefmt="%H:%M:%S",
+    )
+    
+    # Configure root handler
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(formatter)
+    handler.setLevel(log_level)
+    
+    # Configure app loggers
+    app_logger = logging.getLogger("app")
+    app_logger.setLevel(log_level)
+    app_logger.handlers.clear()
+    app_logger.addHandler(handler)
+    app_logger.propagate = False
+    
+    # Also configure uvicorn access logs to be less verbose
+    uvicorn_access = logging.getLogger("uvicorn.access")
+    uvicorn_access.setLevel(logging.WARNING)
+    
+    # Reduce httpx noise
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+
+setup_logging()
 logger = logging.getLogger(__name__)
 
 
@@ -84,6 +126,7 @@ def create_app() -> FastAPI:
         return await _handle_exception(request, exc, handled=False)
 
     app.include_router(chat.router)
+    app.include_router(product_chat.router)
     if settings.langsmith_api_key and settings.langsmith_tracing_v2:
         logger.info(
             "LangSmith tracing enabled for project=%s",

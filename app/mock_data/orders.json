@@ -83,7 +83,6 @@
     "pharmacy_id": "ph3",
     "created_at": "2025-11-10T09:10:00+03:00",
     "cancelled_at": "2025-11-10T10:05:00+03:00",
-    "cancellation_reason": "Изменились планы",
     "items_ready": false,
     "items": [
       {
@@ -118,218 +117,1751 @@
     "currency": "RUB"
   },
   {
-    "order_id": "ord-12345",
-    "user_id": "test-user-123",
-    "status": "IN_PROGRESS",
-    "status_label": "Собираем заказ",
-    "delivery_type": "pickup",
-    "pharmacy_id": "ph4",
-    "created_at": "2025-12-10T14:30:00+03:00",
-    "eta_minutes": 45,
-    "estimated_delivery": "Сегодня",
-    "items_ready": false,
+    "order_id": "ord-30994cda",
+    "user_id": "user-test",
     "items": [
       {
-        "product_id": "prod-nurofen",
-        "title": "Нурофен Экспресс 200 мг №12",
+        "product_id": "prod-theraflu",
         "qty": 2,
-        "price": 320.0,
-        "image_url": "https://cdn.example.com/images/prod-nurofen.png"
-      },
+        "price": 549.0
+      }
+    ],
+    "total": 1098.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T01:00:53.031011",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-5720597a",
+    "user_id": "user-cancel",
+    "items": [
       {
         "product_id": "prod-theraflu",
-        "title": "ТераФлю порошок 10 пак.",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "CANCELLED",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T01:00:53.033709",
+    "estimated_delivery": "Сегодня",
+    "cancelled_at": "2025-12-09T01:00:53.034256",
+    "cancellation_reason": "Тестовая отмена"
+  },
+  {
+    "order_id": "ord-c8aa8cf5",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T01:00:53.040323",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-587d940f",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T01:00:53.040980",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-a78f2902",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
         "qty": 1,
         "price": 549.0,
+        "title": "ТераФлю порошок 10 пак.",
         "image_url": "https://cdn.example.com/images/prod-theraflu.png"
       }
     ],
-    "total": 1189.0,
-    "currency": "RUB"
-  },
-  {
-    "order_id": "ord-67890",
-    "user_id": "test-user-123",
-    "status": "READY_FOR_PICKUP",
-    "status_label": "Готов к выдаче",
-    "delivery_type": "pickup",
-    "pharmacy_id": "ph3",
-    "created_at": "2025-12-09T11:20:00+03:00",
-    "eta_minutes": 0,
-    "estimated_delivery": "Сегодня",
-    "items_ready": true,
-    "pickup_code": "4527",
-    "items": [
-      {
-        "product_id": "prod-paracetamol",
-        "title": "Парацетамол 500 мг №20",
-        "qty": 3,
-        "price": 45.0,
-        "image_url": "https://cdn.example.com/images/prod-paracetamol.png"
-      }
-    ],
-    "total": 135.0,
-    "currency": "RUB"
-  },
-  {
-    "order_id": "ord-11111",
-    "user_id": "test-user-123",
-    "status": "DELIVERED",
-    "status_label": "Получен",
-    "delivery_type": "courier",
-    "created_at": "2025-12-05T09:00:00+03:00",
-    "completed_at": "2025-12-05T15:30:00+03:00",
-    "items_ready": true,
-    "items": [
-      {
-        "product_id": "prod-eye-drops",
-        "title": "Визин капли для глаз 15 мл",
-        "qty": 1,
-        "price": 420.0,
-        "image_url": "https://cdn.example.com/images/prod-eye-drops.png"
-      },
-      {
-        "product_id": "prod-glycine",
-        "title": "Глицин 100 мг №50",
-        "qty": 2,
-        "price": 85.0,
-        "image_url": "https://cdn.example.com/images/prod-glycine.png"
-      }
-    ],
-    "total": 590.0,
-    "currency": "RUB"
-  },
-  {
-    "order_id": "ord-22222",
-    "user_id": "test-user-123",
-    "status": "DELIVERED",
-    "status_label": "Получен",
-    "delivery_type": "pickup",
-    "pharmacy_id": "ph1",
-    "created_at": "2025-11-28T10:00:00+03:00",
-    "completed_at": "2025-11-28T16:45:00+03:00",
-    "items_ready": true,
-    "items": [
-      {
-        "product_id": "prod_001",
-        "title": "Витамин C 500 мг №30",
-        "qty": 2,
-        "price": 350.0,
-        "image_url": "https://cdn.example.com/images/prod-vitamin-c.png"
-      }
-    ],
-    "total": 700.0,
-    "currency": "RUB"
-  },
-  {
-    "order_id": "ord-33333",
-    "user_id": "test-user-123",
-    "status": "CANCELLED",
-    "status_label": "Отменён",
-    "delivery_type": "pickup",
-    "pharmacy_id": "ph4",
-    "created_at": "2025-11-20T08:30:00+03:00",
-    "cancelled_at": "2025-11-20T09:15:00+03:00",
-    "cancellation_reason": "Нашёл дешевле в другом месте",
-    "items_ready": false,
-    "items": [
-      {
-        "product_id": "prod_002",
-        "title": "Омега-3 капсулы №60",
-        "qty": 1,
-        "price": 890.0,
-        "image_url": "https://cdn.example.com/images/prod-omega3.png"
-      }
-    ],
-    "total": 890.0,
-    "currency": "RUB"
-  },
-  {
-    "order_id": "ord-44444",
-    "user_id": "test-user-123",
-    "status": "DELIVERED",
-    "status_label": "Получен",
-    "delivery_type": "pickup",
-    "pharmacy_id": "ph3",
-    "created_at": "2025-11-10T12:00:00+03:00",
-    "completed_at": "2025-11-10T18:00:00+03:00",
-    "items_ready": true,
-    "items": [
-      {
-        "product_id": "prod-suprastin",
-        "title": "Супрастин 25 мг №20",
-        "qty": 1,
-        "price": 140.0,
-        "image_url": "https://cdn.example.com/images/prod-suprastin.png"
-      },
-      {
-        "product_id": "prod-smecta",
-        "title": "Смекта порошок №10",
-        "qty": 2,
-        "price": 180.0,
-        "image_url": "https://cdn.example.com/images/prod-smecta.png"
-      }
-    ],
-    "total": 500.0,
-    "currency": "RUB"
-  },
-  {
-    "order_id": "ord-mother-001",
-    "user_id": "user-mother",
+    "total": 549.0,
+    "currency": "RUB",
     "status": "IN_PROGRESS",
-    "status_label": "В доставке",
-    "delivery_type": "courier",
-    "created_at": "2025-12-10T09:00:00+03:00",
-    "eta_minutes": 60,
-    "estimated_delivery": "Сегодня до 18:00",
-    "items_ready": true,
-    "items": [
-      {
-        "product_id": "prod-baby-cough",
-        "title": "Детский сироп от кашля 100 мл",
-        "qty": 2,
-        "price": 420.0,
-        "image_url": "https://cdn.example.com/images/prod-baby-cough.png"
-      },
-      {
-        "product_id": "prod-zirtek",
-        "title": "Зиртек капли 10 мл",
-        "qty": 1,
-        "price": 380.0,
-        "image_url": "https://cdn.example.com/images/prod-zirtek.png"
-      }
-    ],
-    "total": 1220.0,
-    "currency": "RUB"
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T01:00:53.349348",
+    "estimated_delivery": "Сегодня"
   },
   {
-    "order_id": "ord-elderly-001",
-    "user_id": "user-elderly",
-    "status": "READY_FOR_PICKUP",
-    "status_label": "Готов к выдаче",
-    "delivery_type": "pickup",
-    "pharmacy_id": "ph1",
-    "created_at": "2025-12-09T15:00:00+03:00",
-    "eta_minutes": 0,
-    "items_ready": true,
-    "pickup_code": "7891",
+    "order_id": "ord-dff2779f",
+    "user_id": "user-test",
     "items": [
       {
-        "product_id": "prod-validol",
-        "title": "Валидол 60 мг №20",
+        "product_id": "prod-theraflu",
         "qty": 2,
-        "price": 65.0,
-        "image_url": "https://cdn.example.com/images/prod-validol.png"
-      },
-      {
-        "product_id": "prod-mezim",
-        "title": "Мезим форте №20",
-        "qty": 1,
-        "price": 310.0,
-        "image_url": "https://cdn.example.com/images/prod-mezim.png"
+        "price": 549.0
       }
     ],
-    "total": 440.0,
-    "currency": "RUB"
+    "total": 1098.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T01:02:30.827711",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-03045d43",
+    "user_id": "user-cancel",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "CANCELLED",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T01:02:30.830492",
+    "estimated_delivery": "Сегодня",
+    "cancelled_at": "2025-12-09T01:02:30.831138",
+    "cancellation_reason": "Тестовая отмена"
+  },
+  {
+    "order_id": "ord-01e7b093",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T01:02:30.835766",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-77429df9",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T01:02:30.836506",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-143bd7cd",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0,
+        "title": "ТераФлю порошок 10 пак.",
+        "image_url": "https://cdn.example.com/images/prod-theraflu.png"
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T01:02:30.923939",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-6989ae81",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 2,
+        "price": 549.0
+      }
+    ],
+    "total": 1098.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T19:57:29.956061",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-52a6e6e3",
+    "user_id": "user-cancel",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "CANCELLED",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T19:57:29.959391",
+    "estimated_delivery": "Сегодня",
+    "cancelled_at": "2025-12-09T19:57:29.960192",
+    "cancellation_reason": "Тестовая отмена"
+  },
+  {
+    "order_id": "ord-93b215ec",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T19:57:29.965098",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-edc8dd1a",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T19:57:29.966070",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-519575e5",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0,
+        "title": "ТераФлю порошок 10 пак.",
+        "image_url": "https://cdn.example.com/images/prod-theraflu.png"
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T19:57:30.151068",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-55c57914",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 2,
+        "price": 549.0
+      }
+    ],
+    "total": 1098.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:06:37.717367",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-dc329e46",
+    "user_id": "user-cancel",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "CANCELLED",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:06:37.720733",
+    "estimated_delivery": "Сегодня",
+    "cancelled_at": "2025-12-09T20:06:37.721576",
+    "cancellation_reason": "Тестовая отмена"
+  },
+  {
+    "order_id": "ord-6474383f",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:06:37.726185",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-ec8a7413",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:06:37.727028",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-c4b79997",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0,
+        "title": "ТераФлю порошок 10 пак.",
+        "image_url": "https://cdn.example.com/images/prod-theraflu.png"
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:06:37.841921",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-e728b837",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 2,
+        "price": 549.0
+      }
+    ],
+    "total": 1098.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:08:14.272022",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-355100b7",
+    "user_id": "user-cancel",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "CANCELLED",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:08:14.275197",
+    "estimated_delivery": "Сегодня",
+    "cancelled_at": "2025-12-09T20:08:14.276198",
+    "cancellation_reason": "Тестовая отмена"
+  },
+  {
+    "order_id": "ord-9b803455",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:08:14.281276",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-0cdf5812",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:08:14.282257",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-4952e882",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0,
+        "title": "ТераФлю порошок 10 пак.",
+        "image_url": "https://cdn.example.com/images/prod-theraflu.png"
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:08:14.385677",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-b2b30c0a",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 2,
+        "price": 549.0
+      }
+    ],
+    "total": 1098.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:09:39.695815",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-014961fe",
+    "user_id": "user-cancel",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "CANCELLED",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:09:39.698978",
+    "estimated_delivery": "Сегодня",
+    "cancelled_at": "2025-12-09T20:09:39.700002",
+    "cancellation_reason": "Тестовая отмена"
+  },
+  {
+    "order_id": "ord-0c8bb92f",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:09:39.705428",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-afb8769a",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:09:39.706592",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-1f720f1b",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0,
+        "title": "ТераФлю порошок 10 пак.",
+        "image_url": "https://cdn.example.com/images/prod-theraflu.png"
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:09:39.816293",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-b50f823b",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 2,
+        "price": 549.0
+      }
+    ],
+    "total": 1098.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:11:35.310526",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-99595f6b",
+    "user_id": "user-cancel",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "CANCELLED",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:11:35.313829",
+    "estimated_delivery": "Сегодня",
+    "cancelled_at": "2025-12-09T20:11:35.314957",
+    "cancellation_reason": "Тестовая отмена"
+  },
+  {
+    "order_id": "ord-adda5a2d",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:11:35.320772",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-4a4d47ce",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:11:35.322002",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-e8010d47",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0,
+        "title": "ТераФлю порошок 10 пак.",
+        "image_url": "https://cdn.example.com/images/prod-theraflu.png"
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:11:35.421775",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-b9881002",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 2,
+        "price": 549.0
+      }
+    ],
+    "total": 1098.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:12:36.187039",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-9b121345",
+    "user_id": "user-cancel",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "CANCELLED",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:12:36.190676",
+    "estimated_delivery": "Сегодня",
+    "cancelled_at": "2025-12-09T20:12:36.191905",
+    "cancellation_reason": "Тестовая отмена"
+  },
+  {
+    "order_id": "ord-87979d1a",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:12:36.197064",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-26309f63",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:12:36.198554",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-7e507f3c",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0,
+        "title": "ТераФлю порошок 10 пак.",
+        "image_url": "https://cdn.example.com/images/prod-theraflu.png"
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:12:36.299525",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-859a69c3",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 2,
+        "price": 549.0
+      }
+    ],
+    "total": 1098.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:16:51.400702",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-b76029ec",
+    "user_id": "user-cancel",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "CANCELLED",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:16:51.405607",
+    "estimated_delivery": "Сегодня",
+    "cancelled_at": "2025-12-09T20:16:51.407724",
+    "cancellation_reason": "Тестовая отмена"
+  },
+  {
+    "order_id": "ord-9bb77da2",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:16:51.415267",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-2fd91489",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:16:51.417052",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-7ada0231",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0,
+        "title": "ТераФлю порошок 10 пак.",
+        "image_url": "https://cdn.example.com/images/prod-theraflu.png"
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:16:51.537598",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-22226ca4",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 2,
+        "price": 549.0
+      }
+    ],
+    "total": 1098.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:17:32.844102",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-a627dd9f",
+    "user_id": "user-cancel",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "CANCELLED",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:17:32.847999",
+    "estimated_delivery": "Сегодня",
+    "cancelled_at": "2025-12-09T20:17:32.849674",
+    "cancellation_reason": "Тестовая отмена"
+  },
+  {
+    "order_id": "ord-50a032dc",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:17:32.857057",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-185da3f0",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:17:32.858748",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-435d0d96",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0,
+        "title": "ТераФлю порошок 10 пак.",
+        "image_url": "https://cdn.example.com/images/prod-theraflu.png"
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:17:32.969868",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-6d250985",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 2,
+        "price": 549.0
+      }
+    ],
+    "total": 1098.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:18:43.868914",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-bd3618fa",
+    "user_id": "user-cancel",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "CANCELLED",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:18:43.873338",
+    "estimated_delivery": "Сегодня",
+    "cancelled_at": "2025-12-09T20:18:43.874855",
+    "cancellation_reason": "Тестовая отмена"
+  },
+  {
+    "order_id": "ord-fae1745c",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:18:43.880404",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-eaf1e547",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:18:43.882144",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-53470097",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0,
+        "title": "ТераФлю порошок 10 пак.",
+        "image_url": "https://cdn.example.com/images/prod-theraflu.png"
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T20:18:43.988239",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-c9ce3f6d",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 2,
+        "price": 549.0
+      }
+    ],
+    "total": 1098.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T22:12:40.957892",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-7c381aba",
+    "user_id": "user-cancel",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "CANCELLED",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T22:12:40.961523",
+    "estimated_delivery": "Сегодня",
+    "cancelled_at": "2025-12-09T22:12:40.963765",
+    "cancellation_reason": "Тестовая отмена"
+  },
+  {
+    "order_id": "ord-87b5cb00",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T22:12:40.969458",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-0b4c6659",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T22:12:40.971026",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-f3457c80",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0,
+        "title": "ТераФлю порошок 10 пак.",
+        "image_url": "https://cdn.example.com/images/prod-theraflu.png"
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T22:12:41.534902",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-6d7eab46",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 2,
+        "price": 549.0
+      }
+    ],
+    "total": 1098.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T22:15:17.640810",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-87b95b1a",
+    "user_id": "user-cancel",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "CANCELLED",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T22:15:17.645388",
+    "estimated_delivery": "Сегодня",
+    "cancelled_at": "2025-12-09T22:15:17.647598",
+    "cancellation_reason": "Тестовая отмена"
+  },
+  {
+    "order_id": "ord-d50923aa",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T22:15:17.654896",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-f5d2d2f4",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T22:15:17.656981",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-65b41e6d",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0,
+        "title": "ТераФлю порошок 10 пак.",
+        "image_url": "https://cdn.example.com/images/prod-theraflu.png"
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T22:15:18.226020",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-4f8ac66b",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 2,
+        "price": 549.0
+      }
+    ],
+    "total": 1098.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T22:16:53.787205",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-882885c0",
+    "user_id": "user-cancel",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "CANCELLED",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T22:16:53.791318",
+    "estimated_delivery": "Сегодня",
+    "cancelled_at": "2025-12-09T22:16:53.793190",
+    "cancellation_reason": "Тестовая отмена"
+  },
+  {
+    "order_id": "ord-ca76d8af",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T22:16:53.799958",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-11e9af1b",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T22:16:53.801897",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-9b385969",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0,
+        "title": "ТераФлю порошок 10 пак.",
+        "image_url": "https://cdn.example.com/images/prod-theraflu.png"
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T22:16:54.381642",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-07fefb49",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 2,
+        "price": 549.0
+      }
+    ],
+    "total": 1098.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T22:17:16.319762",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-ac2ff487",
+    "user_id": "user-cancel",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "CANCELLED",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T22:17:16.324812",
+    "estimated_delivery": "Сегодня",
+    "cancelled_at": "2025-12-09T22:17:16.326900",
+    "cancellation_reason": "Тестовая отмена"
+  },
+  {
+    "order_id": "ord-774fa8e2",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T22:17:16.334468",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-7e693cd5",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T22:17:16.336946",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-23ba6c5d",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0,
+        "title": "ТераФлю порошок 10 пак.",
+        "image_url": "https://cdn.example.com/images/prod-theraflu.png"
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T22:17:17.019854",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-2579450f",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 2,
+        "price": 549.0
+      }
+    ],
+    "total": 1098.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T23:16:00.489925",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-a68d3e2c",
+    "user_id": "user-cancel",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "CANCELLED",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T23:16:00.494667",
+    "estimated_delivery": "Сегодня",
+    "cancelled_at": "2025-12-09T23:16:00.496949",
+    "cancellation_reason": "Тестовая отмена"
+  },
+  {
+    "order_id": "ord-b822751a",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T23:16:00.504932",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-b1d8d805",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T23:16:00.507266",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-bb17fe26",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0,
+        "title": "ТераФлю порошок 10 пак.",
+        "image_url": "https://cdn.example.com/images/prod-theraflu.png"
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T23:16:01.042304",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-d71a8ec7",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 2,
+        "price": 549.0
+      }
+    ],
+    "total": 1098.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T23:19:53.249192",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-62fa514c",
+    "user_id": "user-cancel",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "CANCELLED",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T23:19:53.254762",
+    "estimated_delivery": "Сегодня",
+    "cancelled_at": "2025-12-09T23:19:53.257199",
+    "cancellation_reason": "Тестовая отмена"
+  },
+  {
+    "order_id": "ord-fb007668",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T23:19:53.266497",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-ace60c80",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T23:19:53.269162",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-56a8c69a",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0,
+        "title": "ТераФлю порошок 10 пак.",
+        "image_url": "https://cdn.example.com/images/prod-theraflu.png"
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-09T23:19:53.418376",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-32e542bb",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-nurofen",
+        "qty": 1,
+        "price": 320.0,
+        "title": "Нурофен Экспресс 200 мг №12",
+        "image_url": "https://cdn.example.com/images/prod-nurofen.png"
+      }
+    ],
+    "total": 320.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-12T14:52:50.872499",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-08a8aeba",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-nurofen",
+        "qty": 1,
+        "price": 320.0,
+        "title": "Нурофен Экспресс 200 мг №12",
+        "image_url": "https://cdn.example.com/images/prod-nurofen.png"
+      }
+    ],
+    "total": 320.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-12T14:55:05.797857",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-77a92da6",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-nurofen",
+        "qty": 1,
+        "price": 320.0,
+        "title": "Нурофен Экспресс 200 мг №12",
+        "image_url": "https://cdn.example.com/images/prod-nurofen.png"
+      }
+    ],
+    "total": 320.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2025-12-12T14:57:00.048416",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-bd4facf7",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 2,
+        "price": 549.0
+      }
+    ],
+    "total": 1098.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2026-01-22T10:32:44.438875",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-b3689192",
+    "user_id": "user-cancel",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "CANCELLED",
+    "delivery_type": "pickup",
+    "created_at": "2026-01-22T10:32:44.443228",
+    "estimated_delivery": "Сегодня",
+    "cancelled_at": "2026-01-22T10:32:44.445357",
+    "cancellation_reason": "Тестовая отмена"
+  },
+  {
+    "order_id": "ord-541bb27e",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2026-01-22T10:32:44.451801",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-db98a0d5",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2026-01-22T10:32:44.453947",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-6bab68d9",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0,
+        "title": "ТераФлю порошок 10 пак.",
+        "image_url": "https://cdn.example.com/images/prod-theraflu.png"
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2026-01-22T10:32:45.208795",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-ca5abcea",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 2,
+        "price": 549.0
+      }
+    ],
+    "total": 1098.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2026-01-23T09:55:26.916463",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-6e2acc12",
+    "user_id": "user-cancel",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "CANCELLED",
+    "delivery_type": "pickup",
+    "created_at": "2026-01-23T09:55:26.921125",
+    "estimated_delivery": "Сегодня",
+    "cancelled_at": "2026-01-23T09:55:26.923493",
+    "cancellation_reason": "Тестовая отмена"
+  },
+  {
+    "order_id": "ord-1968c40a",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2026-01-23T09:55:26.930761",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-8ee45a03",
+    "user_id": "user-reorder",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2026-01-23T09:55:26.933034",
+    "estimated_delivery": "Сегодня"
+  },
+  {
+    "order_id": "ord-70d1086d",
+    "user_id": "user-test",
+    "items": [
+      {
+        "product_id": "prod-theraflu",
+        "qty": 1,
+        "price": 549.0,
+        "title": "ТераФлю порошок 10 пак.",
+        "image_url": "https://cdn.example.com/images/prod-theraflu.png"
+      }
+    ],
+    "total": 549.0,
+    "currency": "RUB",
+    "status": "IN_PROGRESS",
+    "delivery_type": "pickup",
+    "created_at": "2026-01-23T09:55:27.657853",
+    "estimated_delivery": "Сегодня"
   }
 ]

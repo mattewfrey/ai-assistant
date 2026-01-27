@@ -29,6 +29,8 @@ env/
 # IDE
 .idea/
 .vscode/
+# Исключение: настройки кодировки должны быть в репозитории
+!.vscode/settings.json
 *.swp
 *.swo
 *~
@@ -64,5 +66,9 @@ Thumbs.db
 *.db
 *.sqlite3
 
-.env
-запуск
+# Temporary test files
+test_*.json
+
+# Credentials
+credentials.json
+secrets.json

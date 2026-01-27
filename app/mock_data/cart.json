@@ -2,7 +2,20 @@
   "default": {
     "cart_id": "cart-demo",
     "currency": "RUB",
-    "items": []
+    "items": [
+      {
+        "product_id": "prod-nurofen",
+        "qty": 1,
+        "price": 320.0,
+        "title": "Нурофен Экспресс 200 мг №12",
+        "image_url": "https://cdn.example.com/images/prod-nurofen.png"
+      }
+    ],
+    "applied_promo": {
+      "code": "WELCOME10",
+      "discount_percent": 10,
+      "description": "Скидка 10% на первый заказ"
+    }
   },
   "user_1": {
     "cart_id": "cart-user_1",
@@ -11,16 +24,12 @@
       {
         "product_id": "prod-baby-cough",
         "qty": 1,
-        "price": 420.0,
-        "title": "Детский сироп от кашля 100 мл",
-        "image_url": "https://cdn.example.com/images/prod-baby-cough.png"
+        "price": 420.0
       },
       {
         "product_id": "prod_001",
         "qty": 2,
-        "price": 350.0,
-        "title": "Витамин C 500 мг №30",
-        "image_url": "https://cdn.example.com/images/prod-vitamin-c.png"
+        "price": 350.0
       }
     ]
   },
@@ -31,48 +40,8 @@
       {
         "product_id": "prod_002",
         "qty": 1,
-        "price": 890.0,
-        "title": "Омега-3 капсулы №60",
-        "image_url": "https://cdn.example.com/images/prod-omega3.png"
+        "price": 890.0
       }
     ]
-  },
-  "test-user-123": {
-    "cart_id": "cart-test-user-123",
-    "currency": "RUB",
-    "items": [
-      {
-        "product_id": "prod-aspirin",
-        "qty": 1,
-        "price": 280.0,
-        "title": "Аспирин 500 мг №20",
-        "image_url": "https://cdn.example.com/images/prod-aspirin.png"
-      },
-      {
-        "product_id": "prod-paracetamol",
-        "qty": 2,
-        "price": 45.0,
-        "title": "Парацетамол 500 мг №20",
-        "image_url": "https://cdn.example.com/images/prod-paracetamol.png"
-      }
-    ]
-  },
-  "user-mother": {
-    "cart_id": "cart-user-mother",
-    "currency": "RUB",
-    "items": [
-      {
-        "product_id": "prod-baby-cough",
-        "qty": 2,
-        "price": 420.0,
-        "title": "Детский сироп от кашля 100 мл",
-        "image_url": "https://cdn.example.com/images/prod-baby-cough.png"
-      }
-    ]
-  },
-  "user-elderly": {
-    "cart_id": "cart-user-elderly",
-    "currency": "RUB",
-    "items": []
   }
 }

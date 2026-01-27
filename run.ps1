@@ -1,59 +1,34 @@
-# Smart Pharmacy Assistant - Startup Script
-# Использование: .\run.ps1
+<# 
+ Helper launcher for the backend.
+ - Loads env vars from .env (key=value, ignores comments/blank lines).
+ - Sets a few sane defaults if they are missing.
+#>
 
 $ErrorActionPreference = "Stop"
 
-Write-Host ""
-Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  Smart Pharmacy Assistant" -ForegroundColor Cyan
-Write-Host "========================================" -ForegroundColor Cyan
-Write-Host ""
+# Устанавливаем UTF-8 кодировку для корректного отображения русских символов
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::InputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+$PSDefaultParameterValues['*:Encoding'] = 'utf8'
 
-# Переходим в директорию скрипта
-$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-Set-Location $scriptDir
-
-# Проверяем .env
-if (-not (Test-Path ".env")) {
-    Write-Host "[ERROR] Файл .env не найден!" -ForegroundColor Red
-    exit 1
+$EnvFile = Join-Path $PSScriptRoot ".env"
+if (Test-Path $EnvFile) {
+    Get-Content $EnvFile |
+        Where-Object { $_ -and ($_ -notmatch "^\s*#") } |
+        ForEach-Object {
+            $kv = $_ -split "=", 2
+            if ($kv.Count -eq 2) {
+                $name = $kv[0].Trim()
+                $value = $kv[1]
+                [System.Environment]::SetEnvironmentVariable($name, $value, "Process")
+            }
+        }
 }
 
-# Проверяем Python
-try {
-    $pythonVersion = python --version 2>&1
-    Write-Host "[OK] $pythonVersion" -ForegroundColor Green
-}
-catch {
-    Write-Host "[ERROR] Python не найден" -ForegroundColor Red
-    exit 1
-}
+if (-not $env:APP_ENV) { $env:APP_ENV = "dev" }
+if (-not $env:APP_DEBUG) { $env:APP_DEBUG = "true" }
+if (-not $env:ENABLE_LOCAL_ROUTER) { $env:ENABLE_LOCAL_ROUTER = "true" }
 
-# Проверяем конфигурацию
-Write-Host "[INFO] Проверка настроек..." -ForegroundColor Gray
-$envContent = Get-Content ".env" -Raw
+python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
-if ($envContent -match "OPENAI_API_KEY=sk-") {
-    Write-Host "[OK] OPENAI_API_KEY настроен" -ForegroundColor Green
-}
-else {
-    Write-Host "[WARN] OPENAI_API_KEY не настроен" -ForegroundColor Yellow
-}
-
-if ($envContent -match "USE_LANGCHAIN=true") {
-    Write-Host "[OK] LLM включен" -ForegroundColor Green
-}
-else {
-    Write-Host "[WARN] LLM выключен" -ForegroundColor Yellow
-}
-
-Write-Host ""
-Write-Host "----------------------------------------" -ForegroundColor Cyan
-Write-Host "[START] Запуск сервера..." -ForegroundColor Yellow
-Write-Host "[URL] http://localhost:8000" -ForegroundColor Cyan
-Write-Host "[DOCS] http://localhost:8000/docs" -ForegroundColor Cyan
-Write-Host "----------------------------------------" -ForegroundColor Cyan
-Write-Host ""
-
-# Запуск
-python -m uvicorn app.main:app --reload

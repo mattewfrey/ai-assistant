@@ -121,6 +121,10 @@ class DataPayload(BaseModel):
             self.pharmacies = other.pharmacies
         if other.recommendations:
             self.recommendations = other.recommendations
+        if other.message and not self.message:
+            self.message = other.message
+        if other.metadata:
+            self.metadata.update(other.metadata)
 
 
 class ChatResponse(BaseModel):
@@ -141,6 +145,58 @@ from .llm_intent import (
     SlotType,
     merge_router_and_llm_slots,
     slots_to_parameters,
+)
+from .product_chat import (
+    ProductChatCitation,
+    ProductChatLLMResult,
+    ProductChatMeta,
+    ProductChatRequest,
+    ProductChatResponse,
+    ProductChatUIState,
+    ProductChatRefusalReason,
+)
+from .product_faq import (
+    ProductFAQItem,
+    ProductFAQLLMResult,
+    ProductFAQResponse,
+)
+from .proactive_hints import (
+    ProactiveHint,
+    ProactiveHintsRequest,
+    ProactiveHintsResponse,
+    ProactiveHintType,
+    ProactiveTriggerContext,
+    ProactiveTriggerType,
+)
+from .drug_interaction import (
+    DrugInfo,
+    DrugInteraction,
+    DrugInteractionCheckRequest,
+    DrugInteractionCheckResponse,
+    DrugInteractionChatContext,
+    InteractionSeverity,
+)
+from .smart_analogs import (
+    AnalogComparisonItem,
+    AnalogType,
+    ProductAnalog,
+    SmartAnalogsRequest,
+    SmartAnalogsResponse,
+)
+from .course_calculator import (
+    CourseCalculatorRequest,
+    CourseCalculatorResult,
+    CoursePreset,
+    DosageFrequency,
+    COMMON_COURSE_PRESETS,
+)
+from .purchase_history import (
+    PersonalizationContext,
+    PurchaseFrequency,
+    PurchaseHistoryItem,
+    PurchaseHistoryRequest,
+    PurchaseHistoryResponse,
+    UserPurchaseProfile,
 )
 
 
@@ -167,5 +223,43 @@ __all__ = [
     "UserProfile",
     "merge_router_and_llm_slots",
     "slots_to_parameters",
+    "ProductChatCitation",
+    "ProductChatLLMResult",
+    "ProductChatMeta",
+    "ProductChatRequest",
+    "ProductChatResponse",
+    "ProductChatUIState",
+    "ProductChatRefusalReason",
+    "ProductFAQItem",
+    "ProductFAQLLMResult",
+    "ProductFAQResponse",
+    "ProactiveHint",
+    "ProactiveHintsRequest",
+    "ProactiveHintsResponse",
+    "ProactiveHintType",
+    "ProactiveTriggerContext",
+    "ProactiveTriggerType",
+    "DrugInfo",
+    "DrugInteraction",
+    "DrugInteractionCheckRequest",
+    "DrugInteractionCheckResponse",
+    "DrugInteractionChatContext",
+    "InteractionSeverity",
+    "AnalogComparisonItem",
+    "AnalogType",
+    "ProductAnalog",
+    "SmartAnalogsRequest",
+    "SmartAnalogsResponse",
+    "CourseCalculatorRequest",
+    "CourseCalculatorResult",
+    "CoursePreset",
+    "DosageFrequency",
+    "COMMON_COURSE_PRESETS",
+    "PersonalizationContext",
+    "PurchaseFrequency",
+    "PurchaseHistoryItem",
+    "PurchaseHistoryRequest",
+    "PurchaseHistoryResponse",
+    "UserPurchaseProfile",
 ]
 

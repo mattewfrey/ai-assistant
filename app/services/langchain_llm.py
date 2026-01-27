@@ -77,8 +77,14 @@ from langchain_core.chat_history import BaseChatMessageHistory
 from langchain_core.exceptions import OutputParserException
 from langchain_core.globals import set_llm_cache
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.output_parsers import PydanticOutputParser
+from langchain_core.runnables import RunnableLambda
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_openai import ChatOpenAI
+
+# YandexGPT через прямой REST API (без SDK)
+from app.services.yandex_gpt import ChatYandexGPTDirect
+from app.services.llm_debug_store import get_llm_debug_store
 
 # RunnableRetry location changed across langchain-core versions.
 try:  # pragma: no cover - compatibility shim
@@ -130,12 +136,16 @@ from ..models.llm_intent import (
     LLMIntentResult,
     LLMSlotExtractionResult,
 )
+from ..models.product_chat import ProductChatLLMResult
+from ..models.product_faq import ProductFAQItem, ProductFAQLLMResult
 from ..prompts.beautify_prompt import build_beautify_prompt
 from ..prompts.intent_prompt import (
     build_intent_prompt,
     build_disambiguation_prompt,
     build_slot_extraction_prompt,
 )
+from ..prompts.product_chat_prompt import build_product_chat_prompt
+from ..prompts.product_faq_prompt import build_product_faq_prompt
 from .cache import CachingService, get_caching_service
 from .conversation_store import ConversationStore, get_conversation_store
 from .dialog_state_store import DialogState
@@ -156,6 +166,58 @@ BEAUTIFY_TEMPERATURE = 0.45  # Выше для естественности
 
 # Timeout для LLM вызовов
 LLM_TIMEOUT_SECONDS = 30
+
+
+# =============================================================================
+# LLM Factory
+# =============================================================================
+
+def create_chat_llm(
+    settings: Settings,
+    temperature: float,
+    callbacks: list | None = None,
+) -> ChatOpenAI | ChatYandexGPTDirect:
+    """
+    Factory function to create LLM based on provider setting.
+    
+    Supports:
+    - OpenAI (default)
+    - YandexGPT (via direct REST API - no SDK required)
+    """
+    provider = settings.llm_provider.lower()
+    
+    if provider == "yandex":
+        if not settings.yandex_api_key:
+            raise ValueError("YC_API_KEY is required for YandexGPT")
+        if not settings.yandex_folder_id:
+            raise ValueError("YC_FOLDER_ID is required for YandexGPT")
+        
+        logger.info(
+            "Using YandexGPT via direct REST API: model=%s, folder_id=%s",
+            settings.yandex_model,
+            settings.yandex_folder_id,
+        )
+        
+        return ChatYandexGPTDirect(
+            api_key=settings.yandex_api_key,
+            folder_id=settings.yandex_folder_id,
+            model=settings.yandex_model,
+            temperature=temperature,
+            timeout=settings.http_timeout_seconds or LLM_TIMEOUT_SECONDS,
+        )
+    
+    # Default: OpenAI
+    if not settings.openai_api_key:
+        raise ValueError("OPENAI_API_KEY is required for OpenAI mode")
+    
+    return ChatOpenAI(
+        model=settings.openai_model,
+        api_key=settings.openai_api_key,
+        temperature=temperature,
+        timeout=settings.http_timeout_seconds or LLM_TIMEOUT_SECONDS,
+        base_url=settings.openai_base_url,
+        callbacks=callbacks or None,
+    )
 
 
 # =============================================================================
@@ -184,6 +246,24 @@ class BeautifyResult:
     """Результат beautify_reply."""
     
     reply: Reply
+    cached: bool = False
+
+
+@dataclass
+class ProductChatRunResult:
+    """Результат LLM для Product AI Chat."""
+
+    result: ProductChatLLMResult
+    token_usage: Dict[str, int] = field(default_factory=dict)
+    cached: bool = False
+
+
+@dataclass
+class ProductFAQRunResult:
+    """Результат LLM для генерации FAQ."""
+
+    result: ProductFAQLLMResult
+    token_usage: Dict[str, int] = field(default_factory=dict)
     cached: bool = False
 
 
@@ -242,10 +322,19 @@ class LangchainLLMClient:
         conversation_store: ConversationStore | None = None,
         history_limit: int = 10,
     ) -> None:
-        if not settings.openai_api_key:
-            raise ValueError("OPENAI_API_KEY is required for LangChain mode")
+        # Validate based on provider
+        provider = settings.llm_provider.lower()
+        if provider == "yandex":
+            if not settings.yandex_api_key:
+                raise ValueError("YC_API_KEY is required for YandexGPT mode")
+            if not settings.yandex_folder_id:
+                raise ValueError("YC_FOLDER_ID is required for YandexGPT mode")
+        else:
+            if not settings.openai_api_key:
+                raise ValueError("OPENAI_API_KEY is required for OpenAI mode")
 
         self._settings = settings
+        self._provider = provider
         self._enable_llm_cache(settings)
         self._langsmith_client = self._setup_langsmith(settings)
         self._conversation_store = conversation_store or get_conversation_store()
@@ -254,25 +343,19 @@ class LangchainLLMClient:
         
         # Основная LLM для intent classification (низкая температура)
         if llm is None:
-            self._intent_llm_base = ChatOpenAI(
-                model=settings.openai_model,
-                api_key=settings.openai_api_key,
+            self._intent_llm_base = create_chat_llm(
+                settings=settings,
                 temperature=INTENT_TEMPERATURE,
-                timeout=settings.http_timeout_seconds or LLM_TIMEOUT_SECONDS,
-                base_url=settings.openai_base_url,
-                callbacks=callbacks or None,
+                callbacks=callbacks,
             )
         else:
             self._intent_llm_base = llm
             
         # LLM для beautify (повышенная температура)
-        self._beautify_llm_base = ChatOpenAI(
-            model=settings.openai_model,
-            api_key=settings.openai_api_key,
+        self._beautify_llm_base = create_chat_llm(
+            settings=settings,
             temperature=BEAUTIFY_TEMPERATURE,
-            timeout=settings.http_timeout_seconds or LLM_TIMEOUT_SECONDS,
-            base_url=settings.openai_base_url,
-            callbacks=callbacks or None,
+            callbacks=callbacks,
         )
         
         self._llm_callbacks = callbacks or []
@@ -282,34 +365,35 @@ class LangchainLLMClient:
         schema_hint = json.dumps(LLMIntentResult.model_json_schema(), ensure_ascii=False, indent=2)
         self._intent_prompt = build_intent_prompt(schema_hint)
         self._beautify_prompt = build_beautify_prompt()
+        self._product_chat_prompt = build_product_chat_prompt()
+        
+        # Structured output settings
+        # Note: strict=True is OpenAI-specific, use False for other providers
+        use_strict = self._provider == "openai"
         
         # Structured output для intent classification
-        # Используем method="function_calling" т.к. OpenAI strict mode требует additionalProperties=false
-        self._intent_llm = self._intent_llm_base.with_structured_output(
-            LLMIntentResult,
-            include_raw=True,
-            method="function_calling",
+        self._intent_llm = self._create_structured_output(
+            self._intent_llm_base, LLMIntentResult, use_strict
         )
         
         # Structured output для beautify
-        self._beautify_llm = self._beautify_llm_base.with_structured_output(
-            Reply,
-            include_raw=True,
-            method="function_calling",
+        self._beautify_llm = self._create_structured_output(
+            self._beautify_llm_base, Reply, use_strict
         )
         
         # Structured output для slot extraction
-        self._slot_extraction_llm = self._intent_llm_base.with_structured_output(
-            LLMSlotExtractionResult,
-            include_raw=True,
-            method="function_calling",
+        self._slot_extraction_llm = self._create_structured_output(
+            self._intent_llm_base, LLMSlotExtractionResult, use_strict
         )
         
         # Structured output для disambiguation
-        self._disambiguation_llm = self._intent_llm_base.with_structured_output(
-            LLMDisambiguationResult,
-            include_raw=True,
-            method="function_calling",
+        self._disambiguation_llm = self._create_structured_output(
+            self._intent_llm_base, LLMDisambiguationResult, use_strict
+        )
+
+        # Structured output для product chat
+        self._product_chat_llm = self._create_structured_output(
+            self._intent_llm_base, ProductChatLLMResult, use_strict
         )
         
         # Retry chains
@@ -335,6 +419,23 @@ class LangchainLLMClient:
             )
         else:
             self._intent_with_history = self._intent_chain
+
+        self._product_chat_chain = RunnableRetry(
+            self._product_chat_prompt | self._product_chat_llm,
+            max_attempts=2,
+            retry_if_exception_type=(OutputParserException, ValueError),
+        )
+
+        # FAQ generation chain
+        self._product_faq_prompt = build_product_faq_prompt()
+        self._product_faq_llm = self._create_structured_output(
+            self._intent_llm_base, ProductFAQLLMResult, use_strict
+        )
+        self._product_faq_chain = RunnableRetry(
+            self._product_faq_prompt | self._product_faq_llm,
+            max_attempts=2,
+            retry_if_exception_type=(OutputParserException, ValueError),
+        )
 
     # =========================================================================
     # Основные публичные методы
@@ -440,6 +541,16 @@ class LangchainLLMClient:
         
         config = self._build_invoke_config(conversation_id, metadata)
         
+        # Детальное логирование LLM вызова
+        logger.debug(
+            "trace_id=%s LLM classify_intent request: message='%s' pipeline=%s router_candidates=%s router_slots=%s",
+            trace_id or "-",
+            message[:100],
+            pipeline_path,
+            payload.get("router_candidates", "none"),
+            router_slots or {},
+        )
+        
         try:
             if conversation_id:
                 result = await self._intent_with_history.ainvoke(payload, config=config)
@@ -447,6 +558,16 @@ class LangchainLLMClient:
                 result = await self._intent_chain.ainvoke(payload, config=config)
             
             llm_result, ai_message = self._parse_llm_intent_result(result)
+            
+            # Детальное логирование ответа LLM
+            logger.debug(
+                "trace_id=%s LLM classify_intent response: intent=%s confidence=%.2f slots=%s reasoning='%s'",
+                trace_id or "-",
+                llm_result.intent.value if llm_result.intent else "UNKNOWN",
+                llm_result.confidence,
+                llm_result.slots.to_dict() if llm_result.slots else {},
+                (llm_result.reasoning or "")[:200],
+            )
             
             # Мержим слоты от Router'а и LLM
             if router_slots:
@@ -530,7 +651,7 @@ class LangchainLLMClient:
         llm = self._intent_llm_base.with_structured_output(
             LLMDisambiguationResult,
             include_raw=True,
-            method="function_calling",
+            strict=True,
         )
         chain = RunnableRetry(
             prompt | llm,
@@ -596,7 +717,7 @@ class LangchainLLMClient:
         llm = self._intent_llm_base.with_structured_output(
             LLMSlotExtractionResult,
             include_raw=True,
-            method="function_calling",
+            strict=True,
         )
         chain = RunnableRetry(
             prompt | llm,
@@ -717,6 +838,175 @@ class LangchainLLMClient:
         except Exception as exc:  # pragma: no cover - network level failures
             logger.exception("LangChain beautify_reply failed: %s", exc)
             return BeautifyResult(reply=base_reply, cached=False)
+
+    @traceable(run_type="chain", name="product_chat_answer")
+    async def answer_product_question(
+        self,
+        *,
+        product_id: str,
+        message: str,
+        context_json: Dict[str, Any],
+        conversation_history: str | None = None,
+        conversation_id: str | None = None,
+        user_id: str | None = None,
+        trace_id: str | None = None,
+    ) -> ProductChatRunResult:
+        import time as time_module
+        
+        context_json_str = json.dumps(context_json, ensure_ascii=False)
+        payload = {
+            "product_id": product_id,
+            "user_question": message,
+            "conversation_history": conversation_history or "",
+            "context_json": context_json_str,
+        }
+
+        metadata = {
+            "conversation_id": conversation_id,
+            "user_id": user_id,
+            "product_id": product_id,
+            "pipeline_path": "product_chat",
+        }
+        config = self._build_invoke_config(conversation_id, self._normalize_metadata(metadata))
+        
+        # Формируем полный промпт для debug
+        full_prompt = (
+            f"=== SYSTEM PROMPT ===\n"
+            f"(см. build_product_chat_prompt() в prompts/product_chat_prompt.py)\n\n"
+            f"=== CONTEXT JSON ({len(context_json_str)} chars) ===\n"
+            f"{context_json_str[:2000]}{'...(truncated)' if len(context_json_str) > 2000 else ''}\n\n"
+            f"=== USER QUESTION ===\n{message}\n\n"
+            f"=== CONVERSATION HISTORY ===\n{conversation_history or '(empty)'}"
+        )
+        
+        start_time = time_module.perf_counter()
+        debug_store = get_llm_debug_store()
+
+        try:
+            result = await self._product_chat_chain.ainvoke(payload, config=config)
+            latency_ms = (time_module.perf_counter() - start_time) * 1000
+            
+            parsed, raw_message = self._parse_product_chat_result(result)
+            usage = self._extract_usage(raw_message)
+            
+            # Записываем в debug store
+            raw_content = ""
+            if hasattr(raw_message, "content"):
+                raw_content = str(raw_message.content)
+            
+            debug_store.record_call(
+                call_type="product_chat",
+                model=self._settings.yandex_model if self._provider == "yandex" else self._settings.openai_model,
+                user_message=message,
+                system_prompt="(см. build_product_chat_prompt())",
+                full_prompt=full_prompt,
+                raw_response=raw_content,
+                parsed_response=parsed.model_dump() if hasattr(parsed, "model_dump") else {},
+                token_usage=usage,
+                latency_ms=latency_ms,
+                cached=False,
+                trace_id=trace_id,
+                conversation_id=conversation_id,
+                product_id=product_id,
+            )
+            
+            logger.info(
+                "trace_id=%s product_chat_answer product_id=%s tokens=%s",
+                trace_id or "-",
+                product_id,
+                usage,
+            )
+            return ProductChatRunResult(result=parsed, token_usage=usage, cached=False)
+        except Exception as exc:  # pragma: no cover
+            latency_ms = (time_module.perf_counter() - start_time) * 1000
+            debug_store.record_call(
+                call_type="product_chat",
+                model=self._settings.yandex_model if self._provider == "yandex" else self._settings.openai_model,
+                user_message=message,
+                system_prompt="(см. build_product_chat_prompt())",
+                full_prompt=full_prompt,
+                raw_response="",
+                parsed_response={},
+                token_usage={},
+                latency_ms=latency_ms,
+                cached=False,
+                error=str(exc),
+                trace_id=trace_id,
+                conversation_id=conversation_id,
+                product_id=product_id,
+            )
+            logger.exception("Product chat LLM failed: %s", exc)
+            return ProductChatRunResult(result=self._fallback_product_chat_result(), token_usage={}, cached=False)
+
+    @traceable(run_type="chain", name="generate_product_faqs")
+    async def generate_product_faqs(
+        self,
+        *,
+        product_id: str,
+        context_json: Dict[str, Any],
+        trace_id: str | None = None,
+    ) -> ProductFAQRunResult:
+        """Generate FAQs for a product based on its context."""
+        payload = {
+            "product_id": product_id,
+            "context_json": json.dumps(context_json, ensure_ascii=False),
+        }
+
+        metadata = {
+            "product_id": product_id,
+            "pipeline_path": "product_faq",
+        }
+        config = self._build_invoke_config(None, self._normalize_metadata(metadata))
+
+        try:
+            result = await self._product_faq_chain.ainvoke(payload, config=config)
+            parsed, raw_message = self._parse_product_faq_result(result)
+            usage = self._extract_usage(raw_message)
+            logger.info(
+                "trace_id=%s generate_product_faqs product_id=%s faq_count=%d tokens=%s",
+                trace_id or "-",
+                product_id,
+                len(parsed.faqs),
+                usage,
+            )
+            return ProductFAQRunResult(result=parsed, token_usage=usage, cached=False)
+        except Exception as exc:  # pragma: no cover
+            logger.exception("Product FAQ LLM failed: %s", exc)
+            return ProductFAQRunResult(
+                result=ProductFAQLLMResult(faqs=[]),
+                token_usage={},
+                cached=False,
+            )
+
+    def _parse_product_faq_result(self, result: Any) -> Tuple[ProductFAQLLMResult, AIMessage | None]:
+        """Парсит результат ProductFAQLLMResult."""
+        parsed = result
+        raw_message: AIMessage | None = None
+
+        if isinstance(result, dict) and "parsed" in result:
+            parsed = result.get("parsed")
+            raw_message = result.get("raw")
+        elif hasattr(result, "raw"):
+            raw_message = getattr(result, "raw", None)
+            parsed = getattr(result, "parsed", result)
+
+        if isinstance(parsed, ProductFAQLLMResult):
+            return parsed, raw_message
+
+        if isinstance(parsed, AIMessage):
+            raw_message = parsed
+            content = _extract_message_content(parsed)
+            try:
+                return ProductFAQLLMResult.model_validate_json(content), raw_message
+            except Exception as exc:
+                logger.warning("Failed to parse ProductFAQLLMResult JSON: %s; payload=%s", exc, content[:200])
+                return ProductFAQLLMResult(faqs=[]), raw_message
+
+        try:
+            return ProductFAQLLMResult.model_validate(parsed), raw_message
+        except Exception as exc:
+            logger.warning("Failed to parse ProductFAQLLMResult: %s; payload=%s", exc, parsed)
+            return ProductFAQLLMResult(faqs=[]), raw_message
 
     # =========================================================================
     # Legacy API для обратной совместимости
@@ -865,6 +1155,36 @@ class LangchainLLMClient:
             logger.warning("Failed to parse Reply: %s; payload=%s", exc, parsed)
             return Reply(text=str(parsed) if parsed else "Готово."), raw_message
 
+    def _parse_product_chat_result(self, result: Any) -> Tuple[ProductChatLLMResult, AIMessage | None]:
+        """Парсит результат ProductChatLLMResult."""
+        parsed = result
+        raw_message: AIMessage | None = None
+
+        if isinstance(result, dict) and "parsed" in result:
+            parsed = result.get("parsed")
+            raw_message = result.get("raw")
+        elif hasattr(result, "raw"):
+            raw_message = getattr(result, "raw", None)
+            parsed = getattr(result, "parsed", result)
+
+        if isinstance(parsed, ProductChatLLMResult):
+            return parsed, raw_message
+
+        if isinstance(parsed, AIMessage):
+            raw_message = parsed
+            content = _extract_message_content(parsed)
+            try:
+                return ProductChatLLMResult.model_validate_json(content), raw_message
+            except Exception as exc:
+                logger.warning("Failed to parse ProductChatLLMResult JSON: %s; payload=%s", exc, content[:200])
+                return self._fallback_product_chat_result(), raw_message
+
+        try:
+            return ProductChatLLMResult.model_validate(parsed), raw_message
+        except Exception as exc:
+            logger.warning("Failed to parse ProductChatLLMResult: %s; payload=%s", exc, parsed)
+            return self._fallback_product_chat_result(), raw_message
+
     # =========================================================================
     # Приватные методы - построение ответов
     # =========================================================================
@@ -927,6 +1247,18 @@ class LangchainLLMClient:
         )
 
     @staticmethod
+    def _fallback_product_chat_result() -> ProductChatLLMResult:
+        return ProductChatLLMResult(
+            answer="Не удалось обработать запрос. Пожалуйста, повторите позже.",
+            needs_clarification=False,
+            clarifying_question=None,
+            out_of_scope=False,
+            refusal_reason=None,
+            used_fields=[],
+            confidence=0.2,
+        )
+
+    @staticmethod
     def _fallback_assistant_response(message: str | None = None) -> AssistantResponse:
         """Возвращает fallback AssistantResponse при ошибке."""
         reply_text = (
@@ -966,11 +1298,10 @@ class LangchainLLMClient:
                 os.environ.setdefault("LANGCHAIN_ENDPOINT", settings.langsmith_endpoint)
             else:
                 os.environ.setdefault("LANGCHAIN_ENDPOINT", "https://api.smith.langchain.com")
-            # Project задаётся через env var LANGSMITH_PROJECT (выше)
-            # Новые версии LangSmith не принимают project в конструкторе
             return LangSmithClient(
                 api_key=settings.langsmith_api_key,
                 api_url=settings.langsmith_endpoint or None,
+                project=project,
             )
         except Exception as exc:  # pragma: no cover - tracing is best-effort
             logger.warning("LangSmith client disabled: %s", exc)
@@ -982,6 +1313,79 @@ class LangchainLLMClient:
         if not settings.langchain_cache:
             return
         set_llm_cache(InMemoryCache())
+
+    @staticmethod
+    def _create_structured_output(llm: Any, schema: type, use_strict: bool = True) -> Any:
+        """
+        Create structured output wrapper for LLM.
+        
+        Handles differences between providers:
+        - OpenAI: supports with_structured_output with strict=True
+        - YandexGPT: does NOT support with_structured_output, use PydanticOutputParser
+        """
+        # First, try with_structured_output (works for OpenAI)
+        try:
+            if use_strict:
+                return llm.with_structured_output(
+                    schema,
+                    include_raw=True,
+                    strict=True,
+                )
+            else:
+                return llm.with_structured_output(
+                    schema,
+                    include_raw=True,
+                )
+        except (TypeError, NotImplementedError):
+            # Fallback for models that don't support with_structured_output (e.g., YandexGPT)
+            logger.info(
+                "LLM does not support with_structured_output, using PydanticOutputParser fallback"
+            )
+            return LangchainLLMClient._create_parser_chain(llm, schema)
+    
+    @staticmethod
+    def _create_parser_chain(llm: Any, schema: type) -> Any:
+        """
+        Create a chain that parses LLM output to Pydantic model.
+        Used as fallback when with_structured_output is not available.
+        """
+        parser = PydanticOutputParser(pydantic_object=schema)
+        
+        async def parse_with_raw(input_data: Any) -> Dict[str, Any]:
+            """Invoke LLM and parse response, returning both raw and parsed."""
+            # Get the raw response from LLM
+            if hasattr(input_data, 'messages'):
+                messages = input_data.messages
+            elif isinstance(input_data, list):
+                messages = input_data
+            else:
+                messages = [HumanMessage(content=str(input_data))]
+            
+            raw_response = await llm.ainvoke(messages)
+            raw_text = raw_response.content if hasattr(raw_response, 'content') else str(raw_response)
+            
+            # Try to extract JSON from the response
+            try:
+                # Try direct parsing first
+                parsed = parser.parse(raw_text)
+            except Exception:
+                # Try to find JSON in the response
+                import re
+                json_match = re.search(r'\{[\s\S]*\}', raw_text)
+                if json_match:
+                    try:
+                        json_str = json_match.group()
+                        parsed = schema.model_validate_json(json_str)
+                    except Exception as e:
+                        logger.error("Failed to parse JSON from LLM response: %s", e)
+                        raise OutputParserException(f"Failed to parse: {raw_text[:200]}")
+                else:
+                    raise OutputParserException(f"No JSON found in response: {raw_text[:200]}")
+            
+            return {"raw": raw_response, "parsed": parsed}
+        
+        # Return a runnable that mimics with_structured_output behavior
+        return RunnableLambda(parse_with_raw)
 
     @staticmethod
     def _build_invoke_config(
