@@ -72,3 +72,24 @@ test_*.json
 # Credentials
 credentials.json
 secrets.json
+
+# Frontend build artifacts
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Python typecheck/lint caches
+.mypy_cache/
+.ruff_cache/
+.pyright/
+
+# Local runtime artifacts
+*.pid
+*.tmp
+
+# Windows noise
+Desktop.ini
+$RECYCLE.BIN/
+
+# Cursor
+.cursor/
